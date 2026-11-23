@@ -6,6 +6,7 @@ import { LAWS } from './laws.js';
 import { makeGunCard } from './textures.js';
 import { rebuildSurfaces, collideRoom, hasRoom, roomStats } from './collide.js';
 import { FX, Trail } from './fx.js';
+import { DepthMap } from './depthmap.js';
 import { initAudio, updateListener, sfxFire, sfxImpact, sfxRewind, sfxClick, sfxVanish } from './audio.js';
 
 export const ROOM = { killRadius: 14, killHeight: 7 };
@@ -18,7 +19,10 @@ const GUN_LENGTH = 0.46; // metres, nose to stock
 const world = await World.create(document.getElementById('scene-container'), {
   xr: {
     sessionMode: SessionMode.ImmersiveAR,
-    features: { handTracking: true, planeDetection: true, meshDetection: true, anchors: true },
+    features: {
+      handTracking: true, planeDetection: true, meshDetection: true, anchors: true,
+      depthSensing: { usage: 'gpu-optimized', format: 'float32' }, // feeds our own live room map
+    },
     offer: 'always',
   },
   render: { camera: { position: [0, 1.6, 0.01], lookAt: [0, 1.2, -1.5] } },
@@ -59,6 +63,8 @@ sun.position.set(2, 6, 3);
 scene.add(sun);
 
 const fx = new FX(scene);
+const depthMap = new DepthMap(world.renderer, scene);
+world.renderer.xr.addEventListener('sessionend', () => depthMap.reset());
 
 // ---------- gun ----------
 const gun = new THREE.Group();
@@ -153,7 +159,11 @@ function setMode(i) {
   cardPulse = 1;
 }
 function statusLine() {
-  if (!world.renderer.xr.isPresenting) return 'trigger fire · A/B cycle · Y clear · stick-click: show room scan';
+  if (!world.renderer.xr.isPresenting) return 'trigger fire · A/B cycle · Y clear · stick-click: show room map';
+  if (depthMap.mode === 'gpu' || depthMap.mode === 'cpu') {
+    return depthMap.active ? `live depth map · ${Math.round(depthMap.solid / 100) / 10}k voxels · stick-click to view` : 'mapping your room: look around';
+  }
+  if (depthMap.mode === 'waiting') return 'starting depth sensor…';
   if (!hasRoom()) return captureAsked ? 'still no room scan: check Settings > Privacy > Spatial data' : 'no room scan: click thumbstick to scan your room';
   return `room: ${roomStats.planes} surfaces · ${roomStats.meshes} meshes · stick-click to view`;
 }
@@ -260,9 +270,15 @@ function contact(b, n, pen, ctx) {
 function collide(b, ctx) {
   b.onFloor = false;
   b.onCeiling = false;
-  collideRoom(b.pos, b.r, (n, pen) => contact(b, n, pen, ctx));
-  // safety net: the tracking floor, in case the room scan is missing or has holes
-  if (b.state === 'free' && b.pos.y < b.r && (!hasRoom() || b.pos.y < b.r - 0.03)) contact(b, UP, b.r - b.pos.y, ctx);
+  const cb = (n, pen) => contact(b, n, pen, ctx);
+  // our live depth map wins; the headset's scan is the fallback
+  const mapped = depthMap.active;
+  if (mapped) {
+    depthMap.collide(b.pos, b.r, cb); // furniture, clutter, people: anything the sensor has seen
+    collideRoom(b.pos, b.r, cb, true); // plus the room's own walls/floor/ceiling, so nothing leaks out of unseen corners
+  } else collideRoom(b.pos, b.r, cb);
+  // safety net: the tracking floor, in case the map has holes
+  if (b.state === 'free' && b.pos.y < b.r && ((!mapped && !hasRoom()) || b.pos.y < b.r - 0.03)) contact(b, UP, b.r - b.pos.y, ctx);
 }
 
 const tmpAcc = new THREE.Vector3();
@@ -282,7 +298,12 @@ function pulse(side, strength, ms) {
 }
 
 let captureAsked = false;
+let viewTime = 0;
 function toggleRoomView() {
+  if (depthMap.mode === 'gpu' || depthMap.mode === 'cpu') {
+    depthMap.setVisible(!depthMap.show || depthMap.showUntil > 0, 0, viewTime);
+    return;
+  }
   const session = world.renderer.xr.getSession?.();
   if (session && !hasRoom() && typeof session.initiateRoomCapture === 'function') {
     captureAsked = true;
@@ -302,6 +323,11 @@ class WeirdPhysicsSystem extends createSystem({
   update(delta, time) {
     const dt = Math.min(delta, 1 / 30);
     rebuildSurfaces(this.queries.planes.entities, this.queries.meshes.entities);
+    viewTime = time;
+    const before = depthMap.mode;
+    depthMap.update(time);
+    if (before === 'waiting' && (depthMap.mode === 'gpu' || depthMap.mode === 'cpu')) depthMap.setVisible(true, 8, time); // show the scan building
+    depthMap.tick(time);
     const player = world.player;
     player.head.getWorldPosition(headPos);
     player.head.getWorldDirection(headFwd).negate();
@@ -433,4 +459,4 @@ class WeirdPhysicsSystem extends createSystem({
 
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { world, bodies, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
+window.__weird = { world, bodies, depthMap, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
