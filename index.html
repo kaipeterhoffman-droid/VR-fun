@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Weird Physics</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d0f14; color: #e8e6e1; font-family: system-ui, sans-serif; overflow: hidden; }
+      #scene-container { position: fixed; inset: 0; }
+      #hud { position: fixed; left: 16px; bottom: 16px; right: 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+      #enter { pointer-events: auto; font: 600 18px system-ui, sans-serif; padding: 14px 26px; border-radius: 999px; border: 0; background: #f2c14e; color: #15120a; cursor: pointer; }
+      #enter[disabled] { opacity: .45; cursor: default; }
+      #note { font-size: 14px; opacity: .75; max-width: 520px; line-height: 1.4; }
+    </style>
+  </head>
+  <body>
+    <div id="scene-container"></div>
+    <div id="hud">
+      <button id="enter" disabled>Enter VR</button>
+      <div id="note">Ten objects, ten bad ideas about physics. Grab with grip or a pinch, throw, observe, regret. B / Y or the red button sends everything home.</div>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
