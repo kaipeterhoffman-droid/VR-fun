@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@iwsdk/core": "1.1.0",
-    "three": "npm:super-three@0.185.0"
+    "three": "npm:super-three@0.185.0",
+    "three-mesh-bvh": "^0.9.1"
   },
   "devDependencies": {
     "@iwsdk/vite-plugin-dev": "1.1.0",

@@ -6,11 +6,13 @@
 const G = 9.81;
 
 function ball(THREE, color, r, opts = {}) {
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshPhysicalMaterial({
     color,
-    roughness: opts.roughness ?? 0.35,
-    metalness: opts.metalness ?? 0.1,
-    emissive: opts.emissive ?? 0x000000,
+    roughness: opts.roughness ?? 0.22,
+    metalness: opts.metalness ?? 0.05,
+    clearcoat: 1,
+    clearcoatRoughness: 0.08,
+    emissive: opts.emissive ?? new THREE.Color(color).multiplyScalar(0.12),
     flatShading: !!opts.flat,
     transparent: !!opts.transparent,
     opacity: opts.opacity ?? 1,
@@ -24,7 +26,7 @@ function striped(THREE, color, stripe, r) {
   const { mat, mesh } = ball(THREE, color, r);
   const band = new THREE.Mesh(
     new THREE.TorusGeometry(r * 1.0, r * 0.12, 8, 32),
-    new THREE.MeshStandardMaterial({ color: stripe, roughness: 0.5 }),
+    new THREE.MeshPhysicalMaterial({ color: stripe, roughness: 0.35, metalness: 0.6, clearcoat: 0.5 }),
   );
   mesh.add(band);
   return { mat, mesh };
@@ -32,9 +34,17 @@ function striped(THREE, color, stripe, r) {
 
 const gravity = (out) => out.set(0, -G, 0);
 
+// Surface responses. n points out of the surface toward the ball; vn = v.n (< 0, incoming).
+export function reflect(b, n, vn, e = 0.6, grip = 0.92) {
+  b.vel.addScaledVector(n, -vn); // remove the normal part
+  b.vel.multiplyScalar(grip); // scuff the tangential part
+  b.vel.addScaledVector(n, -vn * e);
+}
+
 export const LAWS = [
   {
     key: 'newton',
+    surface: (b, n, vn) => reflect(b, n, vn, 0.65),
     name: 'NEWTON',
     blurb: 'The control group. Falls down like a sucker.',
     color: '#d8d4cc',
@@ -48,6 +58,8 @@ export const LAWS = [
 
   {
     key: 'rebel',
+    surfaceNote: 'super bouncy',
+    surface: (b, n, vn) => reflect(b, n, vn, 0.88, 0.97),
     name: 'REBEL',
     blurb: 'Gravity points up. Mind the ceiling.',
     color: '#ff6b4a',
@@ -61,6 +73,12 @@ export const LAWS = [
 
   {
     key: 'runaway',
+    surfaceNote: 'ricochets faster every hit',
+    surface(b, n, vn) {
+      reflect(b, n, vn, 1.0, 1.0);
+      b.vel.multiplyScalar(1.22);
+      if (b.vel.length() > 14) b.vel.setLength(14);
+    },
     name: 'RUNAWAY',
     blurb: 'Pushed away from you, harder the farther it gets.',
     color: '#f2c14e',
@@ -82,6 +100,14 @@ export const LAWS = [
 
   {
     key: 'shy',
+    surfaceNote: 'flinches off at a random angle',
+    surface(b, n, vn, ctx) {
+      reflect(b, n, vn, 0.9, 1.0);
+      const sp = b.vel.length();
+      const kick = ctx.tmpC.randomDirection();
+      if (kick.dot(n) < 0) kick.reflect(n);
+      b.vel.lerp(kick.multiplyScalar(sp + 1.5), 0.55);
+    },
     name: 'SHY',
     blurb: 'Inverse-square repulsion from your hands and everything else.',
     color: '#7fe0c4',
@@ -182,6 +208,8 @@ export const LAWS = [
 
   {
     key: 'slowlight',
+    surfaceNote: 'perfectly elastic, flashes',
+    surface(b, n, vn) { b.vel.addScaledVector(n, -2 * vn); },
     name: 'SLOWLIGHT',
     blurb: 'Light speed here is 2.2 m/s. Mass grows with speed; it squashes and shifts color.',
     color: '#6fa8ff',
@@ -258,6 +286,13 @@ export const LAWS = [
 
   {
     key: 'tide',
+    surfaceNote: 'sticks where it lands and keeps pulling',
+    surface(b, n) {
+      b.vel.set(0, 0, 0);
+      b.data.stuck = true;
+      b.data.stuckN = n.clone();
+    },
+    kinematicNow: (b) => !!b.data.stuck,
     name: 'TIDE',
     blurb: 'A gravity well with a wobble. Pulls, then shoves. Carry it around.',
     color: '#4a8cff',
@@ -280,6 +315,13 @@ export const LAWS = [
       return 3.2 * Math.sin(t * 1.1) + 1.8 * Math.sin(t * 2.9 + 1.0) + 1.2;
     },
     accel: (b, ctx, out) => out.set(0, 0, 0),
+    step(b, ctx) {
+      if (b.data.stuck) { b.vel.set(0, 0, 0); return; }
+      const a = ctx.fieldsOn(b, ctx.tmpA.set(0, 0, 0));
+      b.vel.addScaledVector(a, ctx.dt);
+      b.vel.multiplyScalar(1 - 2.5 * ctx.dt);
+      b.pos.addScaledVector(b.vel, ctx.dt);
+    },
     field(src, b, ctx, out) {
       const v = ctx.tmpC.subVectors(src.pos, b.pos);
       const d2 = v.lengthSq();
@@ -301,6 +343,8 @@ export const LAWS = [
 
   {
     key: 'bashful',
+    surfaceNote: 'slides along surfaces without bouncing',
+    surface: (b, n, vn) => reflect(b, n, vn, 0, 0.99),
     name: 'BASHFUL',
     blurb: 'Only moves when nobody is looking at it.',
     color: '#ff9ec7',
@@ -332,6 +376,8 @@ export const LAWS = [
 
   {
     key: 'contrarian',
+    surfaceNote: 'bounces straight back the way it came',
+    surface(b, n, vn) { b.vel.multiplyScalar(-0.9); },
     name: 'CONTRARIAN',
     blurb: 'Negative inertia. Throw it away and it comes at you.',
     color: '#9be15d',
@@ -352,6 +398,11 @@ export const LAWS = [
 
   {
     key: 'cyclotron',
+    surfaceNote: 'flips its curl on every bounce',
+    surface(b, n, vn) {
+      reflect(b, n, vn, 0.8, 0.95);
+      b.data.w = -(b.data.w ?? 3.0);
+    },
     name: 'CYCLOTRON',
     blurb: 'Charged, in a vertical magnetic field. Throw flat and it comes back around.',
     color: '#b48cff',
@@ -362,7 +413,7 @@ export const LAWS = [
       return { root: mesh, mat };
     },
     accel(b, ctx, out) {
-      const w = 3.0; // qB/m, rad/s
+      const w = b.data.w ?? 3.0; // qB/m, rad/s
       // a = w (v x up)
       return out.set(-b.vel.z * w, -G, b.vel.x * w);
     },

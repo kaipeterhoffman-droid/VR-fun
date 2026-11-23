@@ -1,14 +1,18 @@
-import { World, SessionMode, createSystem, XRPlane, XRMesh } from '@iwsdk/core';
+import { World, SessionMode, createSystem, XRPlane, XRMesh, SceneUnderstandingSystem } from '@iwsdk/core';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { LAWS } from './laws.js';
-import { makeLabelTexture } from './textures.js';
+import { makeGunCard } from './textures.js';
+import { rebuildSurfaces, collideRoom, hasRoom, roomStats } from './collide.js';
+import { FX, Trail } from './fx.js';
+import { initAudio, updateListener, sfxFire, sfxImpact, sfxRewind, sfxClick, sfxVanish } from './audio.js';
 
-// ---------- room ----------
-// No walls in passthrough: only the real floor (y = 0) bounces things. Shots die past these bounds.
-export const ROOM = { half: 1e6, height: 1e6, killRadius: 12, killHeight: 6 };
-const MAX_SHOTS = 80;
+export const ROOM = { killRadius: 14, killHeight: 7 };
+const MAX_SHOTS = 70;
 const MAX_AGE = 30;
 const MUZZLE_SPEED = 9;
+const GUN_MODEL = './models/blasters/blaster-h.glb';
 
 const world = await World.create(document.getElementById('scene-container'), {
   xr: {
@@ -24,6 +28,7 @@ const world = await World.create(document.getElementById('scene-container'), {
   },
 });
 
+const audioState = {};
 const enterBtn = document.getElementById('enter');
 if (navigator.xr) {
   navigator.xr.isSessionSupported('immersive-ar').then((ok) => {
@@ -33,70 +38,119 @@ if (navigator.xr) {
 } else {
   enterBtn.textContent = 'Passthrough AR not available here';
 }
-enterBtn.addEventListener('click', () => world.launchXR());
+enterBtn.addEventListener('click', () => { initAudio(audioState); world.launchXR(); });
+// the Quest browser can also start the session from its own UI; unlock audio on any gesture
+['pointerdown', 'keydown', 'touchstart'].forEach((ev) => window.addEventListener(ev, () => initAudio(audioState), { once: true }));
+world.renderer.xr.addEventListener('sessionstart', () => initAudio(audioState));
 
 const scene = world.scene;
 scene.background = null; // passthrough: your room is the backdrop
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.6));
-const sun = new THREE.DirectionalLight(0xfff1dc, 1.2);
+// image-based lighting so the glossy shots actually look glossy
+{
+  const pmrem = new THREE.PMREMGenerator(world.renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.9;
+}
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 0.8));
+const sun = new THREE.DirectionalLight(0xfff1dc, 1.0);
 sun.position.set(2, 6, 3);
 scene.add(sun);
 
-// ---------- gun ----------
-const labelTex = LAWS.map((l) => makeLabelTexture(l.name, l.blurb, l.color));
-const gun = new THREE.Group();
-const gunDark = new THREE.MeshStandardMaterial({ color: 0x2a2e38, roughness: 0.5, metalness: 0.4 });
-const gunAccent = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x000000, roughness: 0.3 });
-{
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.05, 0.15), gunDark);
-  body.position.set(0, 0, 0.02);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.1, 0.045), gunDark);
-  grip.position.set(0, -0.06, 0.07);
-  grip.rotation.x = -0.35;
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.016, 0.14, 16), gunDark);
-  barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.008, -0.11);
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.019, 0.005, 8, 24), gunAccent);
-  ring.position.set(0, 0.008, -0.18);
-  const chamber = new THREE.Mesh(new THREE.SphereGeometry(0.022, 20, 12), gunAccent);
-  chamber.position.set(0, 0.035, 0.02);
-  gun.add(body, grip, barrel, ring, chamber);
-}
-// grip pose is roughly the controller handle; nudge so the barrel follows the pointing ray
-gun.position.set(0, -0.01, 0.03);
-const muzzle = new THREE.Object3D();
-muzzle.position.set(0, 0.008, -0.2);
-gun.add(muzzle);
-const modeCard = new THREE.Mesh(
-  new THREE.PlaneGeometry(0.16, 0.08),
-  new THREE.MeshBasicMaterial({ map: labelTex[0], transparent: true, depthTest: false }),
-);
-modeCard.position.set(0, 0.09, 0.03);
-modeCard.rotation.x = -0.5;
-modeCard.renderOrder = 10;
-gun.add(modeCard);
+const fx = new FX(scene);
 
-let gunSide = 'right';
+// ---------- gun ----------
+const gun = new THREE.Group();
+const muzzle = new THREE.Object3D();
+gun.add(muzzle);
+const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+const muzzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.004, 10, 32), new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.6, roughness: 0.2,
+}));
+const chamber = new THREE.Mesh(new THREE.SphereGeometry(0.013, 24, 16), new THREE.MeshPhysicalMaterial({
+  color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.8, clearcoat: 1, roughness: 0.1,
+}));
+const chamberHalo = new THREE.Mesh(new THREE.SphereGeometry(0.024, 16, 12), glowMat);
+chamber.add(chamberHalo);
+gun.add(muzzleRing, chamber);
+
+const { tex: cardTex, draw: drawCard } = makeGunCard();
+const card = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.17, 0.0956),
+  new THREE.MeshBasicMaterial({ map: cardTex, transparent: true, depthTest: false }),
+);
+card.rotation.x = -0.45;
+card.renderOrder = 20;
+gun.add(card);
+
+// fallback body until the model loads (or if it never does)
+const fallback = new THREE.Mesh(
+  new THREE.BoxGeometry(0.04, 0.05, 0.18),
+  new THREE.MeshStandardMaterial({ color: 0x30343f, roughness: 0.5, metalness: 0.4 }),
+);
+fallback.position.set(0, -0.015, 0.0);
+gun.add(fallback);
+placeGunParts(new THREE.Box3(new THREE.Vector3(-0.02, -0.04, -0.09), new THREE.Vector3(0.02, 0.01, 0.09)));
+
+function placeGunParts(box) {
+  const size = box.getSize(new THREE.Vector3());
+  const cx = (box.min.x + box.max.x) / 2;
+  // muzzle on the front face, upper part (where these blasters keep the barrel)
+  muzzle.position.set(cx, box.max.y - size.y * 0.3, box.min.z - 0.012);
+  muzzleRing.position.set(cx, muzzle.position.y, box.min.z - 0.002);
+  chamber.position.set(cx, box.max.y + 0.006, box.min.z + size.z * 0.55);
+  card.position.set(0, box.max.y + 0.08, box.min.z + size.z * 0.62);
+}
+
+new GLTFLoader().load(GUN_MODEL, (gltf) => {
+  const model = gltf.scene;
+  model.traverse((o) => {
+    if (o.isMesh) {
+      o.material.envMapIntensity = 1.1;
+      if (o.material.map) o.material.map.anisotropy = 8;
+    }
+  });
+  // ~22 cm long; the grip sits under and behind the controller's ray origin
+  let box = new THREE.Box3().setFromObject(model);
+  model.scale.setScalar(0.22 / (box.max.z - box.min.z));
+  model.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(model);
+  model.position.set(-(box.min.x + box.max.x) / 2, -box.max.y + 0.012, -box.min.z - 0.15);
+  model.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(model); // gun-local, since the model has no parent yet
+  gun.remove(fallback);
+  gun.add(model);
+  placeGunParts(box);
+}, undefined, () => {});
+
 let mode = 0;
+let cardDirty = true;
+let cardPulse = 0;
+let lastStats = '';
 function setMode(i) {
   mode = (i + LAWS.length) % LAWS.length;
   const c = new THREE.Color(LAWS[mode].color);
-  gunAccent.color.copy(c);
-  gunAccent.emissive.copy(c).multiplyScalar(0.45);
-  modeCard.material.map = labelTex[mode];
-  modeCard.material.needsUpdate = true;
-  cardFlash = 1.2;
+  muzzleRing.material.color.copy(c);
+  muzzleRing.material.emissive.copy(c);
+  chamber.material.color.copy(c);
+  chamber.material.emissive.copy(c);
+  glowMat.color.copy(c).multiplyScalar(0.35);
+  cardDirty = true;
+  cardPulse = 1;
 }
-let cardFlash = 0;
+function statusLine() {
+  if (!world.renderer.xr.isPresenting) return 'trigger fire · A/B cycle · Y clear · stick-click: show room scan';
+  if (!hasRoom()) return 'no room scan yet: run Space Setup, allow spatial data';
+  return `room: ${roomStats.planes} surfaces · ${roomStats.meshes} meshes · stick-click to view`;
+}
 
-// ---------- projectiles ----------
+// ---------- shots ----------
 const shadowTex = (() => {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
   const g = c.getContext('2d');
   const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gr.addColorStop(0, 'rgba(0,0,0,0.55)');
+  gr.addColorStop(0, 'rgba(0,0,0,0.5)');
   gr.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = gr;
   g.fillRect(0, 0, 64, 64);
@@ -106,9 +160,11 @@ const shadowGeo = new THREE.PlaneGeometry(1, 1);
 
 export const bodies = [];
 
-function removeBody(b) {
+function removeBody(b, quiet = false) {
+  if (!quiet) { fx.burst(b.pos, b.law.color, { count: 10, speed: 0.6, life: 0.4, gravity: 0 }); sfxVanish(b.pos); }
   scene.remove(b.obj, b.shadow);
   if (b.lineRef) { scene.remove(b.lineRef); b.lineRef.geometry.dispose(); }
+  b.trail.dispose();
   b.obj.traverse((o) => { o.geometry?.dispose(); });
   b.shadow.material.dispose();
   const i = bodies.indexOf(b);
@@ -116,7 +172,8 @@ function removeBody(b) {
 }
 
 function clearAll() {
-  while (bodies.length) removeBody(bodies[0]);
+  const quiet = bodies.length > 12;
+  for (const b of [...bodies]) removeBody(b, quiet);
 }
 
 const tmpV = new THREE.Vector3();
@@ -133,166 +190,69 @@ function fire(origin, dir, lawIndex = mode, speed = MUZZLE_SPEED) {
   );
   shadow.rotation.x = -Math.PI / 2;
   scene.add(shadow);
+  const trail = new Trail(scene, law.color);
+  trail.reset(origin);
   const b = {
-    law, obj: root, mat, shadow,
+    law, obj: root, mat, shadow, trail,
     r: law.radius, m: law.mass ?? 1,
     pos: origin.clone(),
     vel: dir.clone().normalize().multiplyScalar(speed),
     angVel: new THREE.Vector3((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8),
-    state: 'free', idle: 0, age: 0, data: {},
+    state: 'free', idle: 0, age: 0, data: {}, hits: 0,
   };
   bodies.push(b);
   law.onRelease?.(b, {});
-  while (bodies.length > MAX_SHOTS) removeBody(bodies[0]);
+  while (bodies.length > MAX_SHOTS) removeBody(bodies[0], true);
   return b;
 }
 
 // ---------- simulation ----------
 const headPos = new THREE.Vector3();
 const headFwd = new THREE.Vector3();
+const headUp = new THREE.Vector3();
 const handPos = [new THREE.Vector3(), new THREE.Vector3()];
 const handOk = [false, false];
 const muzzlePos = new THREE.Vector3();
 const muzzleDir = new THREE.Vector3();
+const contactPoint = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 
-function collideStatic(b, onHit) {
-  const { pos, vel, r } = b;
-  const e = b.law.restitution ?? 0.6;
-  let hit = false;
-  if (pos.y - r < 0) {
-    pos.y = r;
-    if (vel.y < 0) {
-      if (vel.y < -0.4) hit = 'floor';
-      vel.y = -vel.y * e;
-      if (Math.abs(vel.y) < 0.25) vel.y = 0;
-    }
-    b.onFloor = true;
-  } else b.onFloor = pos.y - r < 0.002;
-  if (pos.y + r > ROOM.height) {
-    pos.y = ROOM.height - r;
-    if (vel.y > 0) {
-      if (vel.y > 0.4) hit = 'ceiling';
-      vel.y = -vel.y * e;
-      if (Math.abs(vel.y) < 0.25) vel.y = 0;
-    }
-    b.onCeiling = true;
-  } else b.onCeiling = ROOM.height - pos.y - r < 0.002;
-  const lim = ROOM.half - r;
-  for (const ax of ['x', 'z']) {
-    if (pos[ax] > lim) {
-      pos[ax] = lim;
-      if (vel[ax] > 0) { if (vel[ax] > 0.4) hit = 'wall'; vel[ax] = -vel[ax] * e; }
-    } else if (pos[ax] < -lim) {
-      pos[ax] = -lim;
-      if (vel[ax] < 0) { if (vel[ax] < -0.4) hit = 'wall'; vel[ax] = -vel[ax] * e; }
-    }
-  }
-  for (const c of colliders) {
-    const h = c.type === 'plane' ? collidePlane(b, c, e) : collideBox(b, c, e);
-    if (h) hit = h;
-  }
-  if (hit && onHit) onHit(hit);
-}
-
-// ---------- real-room colliders (from Quest scene understanding) ----------
-const colliders = [];
-const cLocal = new THREE.Vector3();
-const cN = new THREE.Vector3();
-function pointInPoly(poly, x, z) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, zi = poly[i].z, xj = poly[j].x, zj = poly[j].z;
-    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi + 1e-12) + xi) inside = !inside;
-  }
-  return inside;
-}
-function bounce(b, n, pen, e) {
+// One surface contact: push out, let the law decide the bounce, make it look and sound like something.
+function contact(b, n, pen, ctx) {
   b.pos.addScaledVector(n, pen);
-  const vn = b.vel.dot(n);
-  if (vn < 0) {
-    b.vel.addScaledVector(n, -(1 + e) * vn);
-    if (n.y > 0.7) b.onFloor = true;
-    if (n.y < -0.7) b.onCeiling = true;
-    return vn < -0.4;
-  }
   if (n.y > 0.7) b.onFloor = true;
-  return false;
-}
-function collidePlane(b, c, e) {
-  cLocal.copy(b.pos).applyMatrix4(c.inv);
-  if (Math.abs(cLocal.y) >= b.r) return false;
-  if (cLocal.x < c.minX || cLocal.x > c.maxX || cLocal.z < c.minZ || cLocal.z > c.maxZ) return false;
-  if (!pointInPoly(c.poly, cLocal.x, cLocal.z)) return false;
-  const side = cLocal.y >= 0 ? 1 : -1;
-  cN.copy(c.normal).multiplyScalar(side);
-  return bounce(b, cN, b.r - Math.abs(cLocal.y), e) ? 'wall' : false;
-}
-function collideBox(b, c, e) {
-  cLocal.copy(b.pos).applyMatrix4(c.inv);
-  const { min, max } = c;
-  const qx = Math.min(Math.max(cLocal.x, min.x), max.x);
-  const qy = Math.min(Math.max(cLocal.y, min.y), max.y);
-  const qz = Math.min(Math.max(cLocal.z, min.z), max.z);
-  let dx = cLocal.x - qx, dy = cLocal.y - qy, dz = cLocal.z - qz;
-  let d = Math.hypot(dx, dy, dz);
-  let pen;
-  if (d > 1e-6) {
-    if (d >= b.r) return false;
-    pen = b.r - d; dx /= d; dy /= d; dz /= d;
-  } else {
-    // center inside the box: leave through the nearest face
-    const opts = [
-      [cLocal.x - min.x, -1, 0, 0], [max.x - cLocal.x, 1, 0, 0],
-      [cLocal.y - min.y, 0, -1, 0], [max.y - cLocal.y, 0, 1, 0],
-      [cLocal.z - min.z, 0, 0, -1], [max.z - cLocal.z, 0, 0, 1],
-    ].sort((a, z) => a[0] - z[0])[0];
-    pen = opts[0] + b.r; dx = opts[1]; dy = opts[2]; dz = opts[3];
+  if (n.y < -0.7) b.onCeiling = true;
+  const vn = b.vel.dot(n);
+  if (vn >= 0) return;
+  const speed = -vn;
+  if (b.law.surface) b.law.surface(b, n, vn, ctx);
+  else b.vel.addScaledVector(n, -vn * (1 + (b.law.restitution ?? 0.6)));
+  // settle instead of micro-bouncing forever on floors
+  const vn2 = b.vel.dot(n);
+  if (n.y > 0.7 && vn2 > 0 && vn2 < 0.25) b.vel.addScaledVector(n, -vn2);
+  if (speed > 0.5) {
+    b.hits++;
+    contactPoint.copy(b.pos).addScaledVector(n, -b.r);
+    const big = b.law.key === 'slowlight' || b.law.key === 'tide';
+    fx.ripple(contactPoint, n, b.law.color, big ? 0.6 + speed * 0.05 : 0.18 + speed * 0.04, big ? 0.9 : 0.5);
+    fx.burst(contactPoint, b.law.color, {
+      count: Math.min(36, 6 + speed * 4), speed: 0.6 + speed * 0.25, normal: n, spread: 0.55, life: 0.5,
+    });
+    sfxImpact(b.law.key, contactPoint, speed);
+    b.law.onHit?.(b, 'surface', ctx);
   }
-  cN.set(dx, dy, dz).applyQuaternion(c.quat);
-  return bounce(b, cN, pen, e) ? 'furniture' : false;
 }
-const _q = new THREE.Quaternion();
-function rebuildColliders(planeEntities, meshEntities) {
-  colliders.length = 0;
-  for (const ent of planeEntities) {
-    const obj = ent.object3D;
-    const plane = ent.getValue(XRPlane, '_plane');
-    if (!obj || !plane?.polygon?.length) continue;
-    obj.updateWorldMatrix(true, false);
-    let c = obj.userData.__col;
-    if (!c || c.polySrc !== plane.polygon) {
-      const poly = plane.polygon.map((p) => ({ x: p.x, z: p.z }));
-      c = obj.userData.__col = {
-        type: 'plane', polySrc: plane.polygon, poly,
-        minX: Math.min(...poly.map((p) => p.x)), maxX: Math.max(...poly.map((p) => p.x)),
-        minZ: Math.min(...poly.map((p) => p.z)), maxZ: Math.max(...poly.map((p) => p.z)),
-        inv: new THREE.Matrix4(), normal: new THREE.Vector3(),
-      };
-    }
-    c.inv.copy(obj.matrixWorld).invert();
-    obj.getWorldQuaternion(_q);
-    c.normal.set(0, 1, 0).applyQuaternion(_q);
-    colliders.push(c);
-  }
-  for (const ent of meshEntities) {
-    if (!ent.getValue(XRMesh, 'isBounded3D')) continue;
-    const obj = ent.object3D;
-    if (!obj) continue;
-    obj.updateWorldMatrix(true, false);
-    const mn = ent.getVectorView(XRMesh, 'min');
-    const mx = ent.getVectorView(XRMesh, 'max');
-    let c = obj.userData.__col;
-    if (!c) c = obj.userData.__col = { type: 'box', min: new THREE.Vector3(), max: new THREE.Vector3(), inv: new THREE.Matrix4(), quat: new THREE.Quaternion() };
-    c.min.set(mn[0], mn[1], mn[2]);
-    c.max.set(mx[0], mx[1], mx[2]);
-    c.inv.copy(obj.matrixWorld).invert();
-    obj.getWorldQuaternion(c.quat);
-    colliders.push(c);
-  }
+
+function collide(b, ctx) {
+  b.onFloor = false;
+  b.onCeiling = false;
+  collideRoom(b.pos, b.r, (n, pen) => contact(b, n, pen, ctx));
+  // safety net: the tracking floor, in case the room scan is missing or has holes
+  if (b.state === 'free' && b.pos.y < b.r && (!hasRoom() || b.pos.y < b.r - 0.03)) contact(b, UP, b.r - b.pos.y, ctx);
 }
 
 const tmpAcc = new THREE.Vector3();
-// forces other objects exert (gravity well, repulsion). Objects never collide with each other.
+// forces other shots exert (gravity well, repulsion). Shots never collide with each other.
 function fieldsOn(b, out, ctx) {
   for (const o of bodies) {
     if (o === b || !o.law.field) continue;
@@ -307,17 +267,25 @@ function pulse(side, strength, ms) {
   } catch {}
 }
 
+function toggleRoomView() {
+  const sys = world.getSystem(SceneUnderstandingSystem);
+  if (sys) sys.config.showWireFrame.value = !sys.config.showWireFrame.value;
+}
+
 let fireCooldown = 0;
+const lastReplayDir = new Map();
 class WeirdPhysicsSystem extends createSystem({
   planes: { required: [XRPlane] },
   meshes: { required: [XRMesh] },
 }) {
   update(delta, time) {
     const dt = Math.min(delta, 1 / 30);
-    rebuildColliders(this.queries.planes.entities, this.queries.meshes.entities);
+    rebuildSurfaces(this.queries.planes.entities, this.queries.meshes.entities);
     const player = world.player;
     player.head.getWorldPosition(headPos);
     player.head.getWorldDirection(headFwd).negate();
+    headUp.set(0, 1, 0).applyQuaternion(player.head.getWorldQuaternion(tmpQ));
+    updateListener(headPos, headFwd, headUp);
 
     ['left', 'right'].forEach((side, k) => {
       const g = player.gripSpaces[side];
@@ -325,40 +293,50 @@ class WeirdPhysicsSystem extends createSystem({
       handOk[k] = g.visible !== false && handPos[k].distanceToSquared(headPos) < 1.5 && handPos[k].y > 0.05;
     });
 
-    // keep the gun in the right hand (ray space: -Z points where you aim)
+    // the gun lives in the right hand; -Z of the ray space is where you aim
+    const gunSide = 'right';
     const raySpace = player.raySpaces[gunSide];
     if (gun.parent !== raySpace) raySpace.add(gun);
 
     const xr = world.input.xr;
     const pads = xr.gamepads;
-    const other = gunSide === 'right' ? 'left' : 'right';
-    const gp = pads[gunSide];
-    if (pads.right?.getButtonDown('a-button') || pads.left?.getButtonDown('x-button')) { setMode(mode + 1); pulse(gunSide, 0.2, 20); }
-    if (pads.right?.getButtonDown('b-button')) { setMode(mode - 1); pulse(gunSide, 0.2, 20); }
+    if (pads.right?.getButtonDown('a-button') || pads.left?.getButtonDown('x-button')) { setMode(mode + 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, true); }
+    if (pads.right?.getButtonDown('b-button')) { setMode(mode - 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, false); }
     if (pads.left?.getButtonDown('y-button')) clearAll();
+    if (pads.left?.getButtonDown('xr-standard-thumbstick') || pads.right?.getButtonDown('xr-standard-thumbstick')) toggleRoomView();
 
     let wantFire = false;
     fireCooldown -= dt;
+    const gp = pads[gunSide];
     if (xr.isPrimary('hand', gunSide)) {
       if (xr.getSelectState(gunSide).start) wantFire = true;
     } else if (gp) {
       if (gp.getButtonDown('xr-standard-trigger')) { wantFire = true; fireCooldown = 0.35; }
-      else if (gp.getButtonPressed?.('xr-standard-trigger') && fireCooldown <= 0) { wantFire = true; fireCooldown = 0.16; }
+      else if (gp.getButtonPressed('xr-standard-trigger') && fireCooldown <= 0) { wantFire = true; fireCooldown = 0.15; }
     }
-    // bare-hand pinch with the off hand cycles modes
-    if (xr.isPrimary('hand', other) && xr.getSelectState(other).start) setMode(mode + 1);
+    if (xr.isPrimary('hand', 'left') && xr.getSelectState('left').start) { setMode(mode + 1); sfxClick(headPos, true); }
 
     if (wantFire) {
       muzzle.getWorldPosition(muzzlePos);
       raySpace.getWorldDirection(muzzleDir).negate();
       fire(muzzlePos, muzzleDir);
-      pulse(gunSide, 0.5, 35);
-      gun.position.z = 0.05; // recoil
+      fx.burst(muzzlePos, LAWS[mode].color, { count: 14, speed: 1.4, normal: muzzleDir, spread: 0.35, life: 0.25, gravity: 0, drag: 6 });
+      fx.ripple(muzzlePos, muzzleDir, LAWS[mode].color, 0.09, 0.18);
+      sfxFire(LAWS[mode].key, muzzlePos);
+      pulse(gunSide, 0.55, 35);
+      gun.position.z = 0.03; // recoil
+      gun.rotation.x = 0.12;
     }
-    gun.position.z += (0.03 - gun.position.z) * Math.min(1, dt * 18);
+    gun.position.z += (0 - gun.position.z) * Math.min(1, dt * 16);
+    gun.rotation.x += (0 - gun.rotation.x) * Math.min(1, dt * 12);
 
-    cardFlash = Math.max(0, cardFlash - dt);
-    modeCard.scale.setScalar(1 + cardFlash * 0.25);
+    // card + chamber life
+    const st = statusLine();
+    if (cardDirty || st !== lastStats) { drawCard(LAWS[mode], mode, LAWS.length, st); cardDirty = false; lastStats = st; }
+    cardPulse = Math.max(0, cardPulse - dt * 3);
+    card.scale.setScalar(1 + cardPulse * 0.12);
+    chamber.rotation.y += dt * 2;
+    chamberHalo.scale.setScalar(1 + Math.sin(time * 5) * 0.12 + cardPulse * 0.6);
 
     const ctx = {
       dt, time, headPos, headFwd, handPos, handOk, bodies, THREE, ROOM, scene,
@@ -366,7 +344,9 @@ class WeirdPhysicsSystem extends createSystem({
       fieldsOn: (b, out) => fieldsOn(b, out, ctx),
     };
 
-    const SUB = 3;
+    // 4 substeps: at 9 m/s and 72 fps a shot moves ~3 cm per substep, less than its radius,
+    // so it can't tunnel through a wall
+    const SUB = 4;
     const h = dt / SUB;
     const sctx = { ...ctx, dt: h };
     for (let s = 0; s < SUB; s++) {
@@ -380,9 +360,9 @@ class WeirdPhysicsSystem extends createSystem({
             b.pos.addScaledVector(b.vel, h);
           }
           if (!b.law.kinematicNow?.(b)) {
-            collideStatic(b, (kind) => b.law.onHit?.(b, kind, sctx));
+            collide(b, sctx);
             if (b.onFloor || b.onCeiling) {
-              const fr = 1 - Math.min(1, 1.8 * h);
+              const fr = 1 - Math.min(1, 1.6 * h);
               b.vel.x *= fr; b.vel.z *= fr;
               const sgn = b.onCeiling && !b.onFloor ? -1 : 1;
               b.angVel.set(b.vel.z * sgn, b.angVel.y * fr, -b.vel.x * sgn).divideScalar(b.r);
@@ -396,6 +376,12 @@ class WeirdPhysicsSystem extends createSystem({
 
     for (const b of [...bodies]) {
       b.age += dt;
+      // Palindrome: a whoosh every time it turns around
+      if (b.state === 'replay') {
+        const prev = lastReplayDir.get(b);
+        if (prev !== undefined && prev !== b.data.dir) { sfxRewind(b.pos); fx.burst(b.pos, b.law.color, { count: 12, speed: 0.5, life: 0.4, gravity: 0 }); }
+        lastReplayDir.set(b, b.data.dir);
+      }
       if (b.state === 'free') {
         if (b.vel.lengthSq() < 0.01 && !b.law.kinematicNow?.(b)) b.idle += dt;
         else b.idle = Math.max(0, b.idle - dt * 0.5);
@@ -406,24 +392,24 @@ class WeirdPhysicsSystem extends createSystem({
           b.angVel.multiplyScalar(1 - 0.3 * dt);
         }
       }
-      const far = Math.hypot(b.pos.x - headPos.x, b.pos.z - headPos.z) > ROOM.killRadius || b.pos.y > ROOM.killHeight;
-      const dead = far || b.age > (b.law.lifetime ?? MAX_AGE) || b.idle > (b.law.patience ?? 8) ||
-        !Number.isFinite(b.pos.x + b.pos.y + b.pos.z);
-      if (dead) { removeBody(b); continue; }
-      // shrink away in the last second
-      const left = Math.min((b.law.lifetime ?? MAX_AGE) - b.age, (b.law.patience ?? 8) - b.idle);
-      b.obj.scale.setScalar(Math.min(1, Math.max(0.05, left)));
+      const far = Math.hypot(b.pos.x - headPos.x, b.pos.z - headPos.z) > ROOM.killRadius || b.pos.y > ROOM.killHeight || b.pos.y < -3;
+      const life = Math.min((b.law.lifetime ?? MAX_AGE) - b.age, (b.law.patience ?? 8) - b.idle);
+      if (far || life <= 0 || !Number.isFinite(b.pos.x + b.pos.y + b.pos.z)) { lastReplayDir.delete(b); removeBody(b, far); continue; }
+      // pop in, shrink out
+      b.obj.scale.setScalar(Math.min(1, 0.3 + b.age * 8, Math.max(0.05, life)));
       b.obj.position.copy(b.pos);
       b.law.visual?.(b, ctx);
+      b.trail.push(b.pos, Math.min(1, b.vel.length() / 3));
       const hgt = Math.max(0, b.pos.y - b.r);
       const sc = b.r * 2.6 * (1 + hgt * 0.35);
       b.shadow.position.set(b.pos.x, 0.003, b.pos.z);
       b.shadow.scale.set(sc, sc, sc);
-      b.shadow.material.opacity = Math.max(0.08, 1 - hgt * 0.35);
+      b.shadow.material.opacity = Math.max(0.05, 0.8 - hgt * 0.35);
     }
+    fx.update(dt);
   }
 }
 
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { world, bodies, fire, setMode, clearAll, colliders, get mode() { return mode; } };
+window.__weird = { world, bodies, fire, setMode, clearAll, roomStats, get mode() { return mode; } };

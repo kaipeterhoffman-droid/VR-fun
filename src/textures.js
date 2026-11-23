@@ -99,3 +99,47 @@ export function makePanelTexture() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+// The little screen above the gun: which law is loaded, what it does, how it bounces, room status.
+export function makeGunCard() {
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 360;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const draw = (law, index, total, status) => {
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, 640, 360);
+    roundRect(g, 6, 6, 628, 348, 34);
+    g.fillStyle = 'rgba(10,12,18,0.86)';
+    g.fill();
+    g.lineWidth = 5;
+    g.strokeStyle = law.color;
+    g.stroke();
+    // index pips
+    for (let i = 0; i < total; i++) {
+      g.beginPath();
+      g.arc(320 - ((total - 1) * 22) / 2 + i * 22, 32, i === index ? 7 : 4, 0, Math.PI * 2);
+      g.fillStyle = i === index ? law.color : 'rgba(255,255,255,0.3)';
+      g.fill();
+    }
+    g.textAlign = 'center';
+    g.fillStyle = law.color;
+    g.font = '800 68px system-ui, sans-serif';
+    g.fillText(law.name, 320, 108);
+    g.fillStyle = '#f1efe9';
+    g.font = '500 30px system-ui, sans-serif';
+    const lines = wrap(g, law.blurb, 580).slice(0, 2);
+    lines.forEach((l, i) => g.fillText(l, 320, 158 + i * 36));
+    if (law.surfaceNote) {
+      g.fillStyle = law.color;
+      g.font = 'italic 500 27px system-ui, sans-serif';
+      g.fillText('on impact: ' + law.surfaceNote, 320, 158 + lines.length * 36 + 14);
+    }
+    g.fillStyle = 'rgba(241,239,233,0.55)';
+    g.font = '500 22px system-ui, sans-serif';
+    g.fillText(status, 320, 334);
+    tex.needsUpdate = true;
+  };
+  return { tex, draw };
+}
