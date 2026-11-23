@@ -12,7 +12,8 @@ export const ROOM = { killRadius: 14, killHeight: 7 };
 const MAX_SHOTS = 70;
 const MAX_AGE = 30;
 const MUZZLE_SPEED = 9;
-const GUN_MODEL = './models/blasters/blaster-h.glb';
+const GUN_MODEL = './models/scifi/scifi_assault_b.glb';
+const GUN_LENGTH = 0.46; // metres, nose to stock
 
 const world = await World.create(document.getElementById('scene-container'), {
   xr: {
@@ -64,7 +65,7 @@ const gun = new THREE.Group();
 const muzzle = new THREE.Object3D();
 gun.add(muzzle);
 const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-const muzzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.014, 0.004, 10, 32), new THREE.MeshPhysicalMaterial({
+const muzzleRing = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.005, 10, 32), new THREE.MeshPhysicalMaterial({
   color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.6, roughness: 0.2,
 }));
 const chamber = new THREE.Mesh(new THREE.SphereGeometry(0.013, 24, 16), new THREE.MeshPhysicalMaterial({
@@ -96,31 +97,43 @@ function placeGunParts(box) {
   const size = box.getSize(new THREE.Vector3());
   const cx = (box.min.x + box.max.x) / 2;
   // muzzle on the front face, upper part (where these blasters keep the barrel)
-  muzzle.position.set(cx, box.max.y - size.y * 0.3, box.min.z - 0.012);
+  muzzle.position.set(cx, box.max.y - size.y * 0.32, box.min.z - 0.012);
   muzzleRing.position.set(cx, muzzle.position.y, box.min.z - 0.002);
-  chamber.position.set(cx, box.max.y + 0.006, box.min.z + size.z * 0.55);
-  card.position.set(0, box.max.y + 0.08, box.min.z + size.z * 0.62);
+  chamber.position.set(cx, box.max.y + 0.01, box.min.z + size.z * 0.45);
+  card.position.set(0, box.max.y + 0.09, box.min.z + size.z * 0.62);
 }
 
+const accentMats = [];
 new GLTFLoader().load(GUN_MODEL, (gltf) => {
   const model = gltf.scene;
   model.traverse((o) => {
-    if (o.isMesh) {
-      o.material.envMapIntensity = 1.1;
-      if (o.material.map) o.material.map.anisotropy = 8;
+    if (!o.isMesh) return;
+    const m = o.material;
+    m.envMapIntensity = 1.2;
+    if (m.metalness !== undefined) { m.metalness = Math.max(m.metalness, 0.35); m.roughness = Math.min(m.roughness ?? 1, 0.45); }
+    // the orange trim becomes an energy strip in the loaded law's colour
+    const hsl = {};
+    m.color?.getHSL(hsl);
+    if (hsl.s > 0.4 && hsl.h > 0.03 && hsl.h < 0.17 && !accentMats.includes(m)) {
+      accentMats.push(m);
     }
   });
-  // ~22 cm long; the grip sits under and behind the controller's ray origin
+  // Quaternius guns point down +X; turn the barrel to -Z (where the controller aims)
+  model.rotation.y = Math.PI / 2;
+  model.updateMatrixWorld(true);
   let box = new THREE.Box3().setFromObject(model);
-  model.scale.setScalar(0.22 / (box.max.z - box.min.z));
+  model.scale.setScalar(GUN_LENGTH / (box.max.z - box.min.z));
   model.updateMatrixWorld(true);
   box = new THREE.Box3().setFromObject(model);
-  model.position.set(-(box.min.x + box.max.x) / 2, -box.max.y + 0.012, -box.min.z - 0.15);
+  const len = box.max.z - box.min.z;
+  // the pistol grip sits ~58% of the way back from the nose; put it in the hand, receiver just above
+  model.position.set(-(box.min.x + box.max.x) / 2, -box.max.y + 0.035, -(box.min.z + len * 0.58) + 0.05);
   model.updateMatrixWorld(true);
   box = new THREE.Box3().setFromObject(model); // gun-local, since the model has no parent yet
   gun.remove(fallback);
   gun.add(model);
   placeGunParts(box);
+  setMode(mode);
 }, undefined, () => {});
 
 let mode = 0;
@@ -135,12 +148,13 @@ function setMode(i) {
   chamber.material.color.copy(c);
   chamber.material.emissive.copy(c);
   glowMat.color.copy(c).multiplyScalar(0.35);
+  for (const m of accentMats) { m.color.copy(c); m.emissive?.copy(c); if (m.emissiveIntensity !== undefined) m.emissiveIntensity = 1.4; }
   cardDirty = true;
   cardPulse = 1;
 }
 function statusLine() {
   if (!world.renderer.xr.isPresenting) return 'trigger fire · A/B cycle · Y clear · stick-click: show room scan';
-  if (!hasRoom()) return 'no room scan yet: run Space Setup, allow spatial data';
+  if (!hasRoom()) return captureAsked ? 'still no room scan: check Settings > Privacy > Spatial data' : 'no room scan: click thumbstick to scan your room';
   return `room: ${roomStats.planes} surfaces · ${roomStats.meshes} meshes · stick-click to view`;
 }
 
@@ -267,7 +281,14 @@ function pulse(side, strength, ms) {
   } catch {}
 }
 
+let captureAsked = false;
 function toggleRoomView() {
+  const session = world.renderer.xr.getSession?.();
+  if (session && !hasRoom() && typeof session.initiateRoomCapture === 'function') {
+    captureAsked = true;
+    session.initiateRoomCapture().catch(() => {});
+    return;
+  }
   const sys = world.getSystem(SceneUnderstandingSystem);
   if (sys) sys.config.showWireFrame.value = !sys.config.showWireFrame.value;
 }
@@ -412,4 +433,4 @@ class WeirdPhysicsSystem extends createSystem({
 
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { world, bodies, fire, setMode, clearAll, roomStats, get mode() { return mode; } };
+window.__weird = { world, bodies, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };

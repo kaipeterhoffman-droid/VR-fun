@@ -23,7 +23,7 @@ Controls: trigger fires (hold for auto), A / X next law, B previous, Y clears, t
 | Contrarian | Comes out of the gun backwards | Bounces straight back the way it came |
 | Cyclotron | Curves in a magnetic field | Flips its curl every bounce |
 
-All sounds are synthesized live (Web Audio, HRTF-spatialized). Blaster model: [Kenney Blaster Kit](https://kenney.nl/assets/blaster-kit), CC0.
+All sounds are synthesized live (Web Audio, HRTF-spatialized). Gun model: Quaternius "Sci-Fi Modular Gun Pack" (quaternius.com), CC0.
 
 Physics is a small custom integrator (`src/main.js`, laws in `src/laws.js`, room collision in `src/collide.js`) on top of IWSDK XR input and scene understanding.
 
