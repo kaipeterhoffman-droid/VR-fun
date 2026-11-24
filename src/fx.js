@@ -1,5 +1,6 @@
 // Particles, impact ripples and motion trails. All additive, all pooled, nothing allocated per frame.
 import * as THREE from 'three';
+import { fixAdditive } from './blend.js';
 
 const MAX_P = 900;
 
@@ -69,6 +70,7 @@ export class FX {
       this.rings.push(m);
     }
     this.ringNext = 0;
+    fixAdditive(scene);
     this._c = new THREE.Color();
     this._v = new THREE.Vector3();
     this._z = new THREE.Vector3(0, 0, 1);
@@ -160,6 +162,7 @@ export class Trail {
     this.line.frustumCulled = false;
     this.filled = 0;
     this.scene = scene;
+    fixAdditive(this.line);
     scene.add(this.line);
   }
   reset(p) {
