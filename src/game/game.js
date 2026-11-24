@@ -6,6 +6,7 @@
 // plus style bonuses for every gadget the scoring shot touched on the way in.
 import * as THREE from 'three';
 import { ITEMS, glow } from './items.js';
+import { BALLS, steer } from './balls.js';
 import { Panel, drawBanner, drawShop, drawScore, bullseyeTexture, teeTexture } from './ui.js';
 import { sfxGame } from '../audio.js';
 import { fixAdditive } from '../blend.js';
@@ -34,11 +35,12 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 export function createGame(api) {
   const { world, scene, fx, bodies } = api;
+  const _r = new THREE.Vector3();
   const S = {
     state: 'off', // off | menu | sandbox | setTee | setTarget | pass | build | shoot | over
     players: [0, 1].map((i) => ({ name: `PLAYER ${i + 1}`, color: P_COLORS[i], score: 0, cash: START_CASH })),
     steps: [], step: -1, cur: 0, round: 0,
-    shotsLeft: 0, shotN: 0, shot: null, shotWhy: '', note: '',
+    shotsLeft: 0, shotN: 0, shots: [], ball: 0, shotWhy: '', note: '',
     items: [], placed: [], pending: null, sel: 0, dist: 1.2, yaw: 0,
     tee: null, target: null, wait: null, match: false,
   };
@@ -50,7 +52,18 @@ export function createGame(api) {
     time: 0, dt: 0, bodies, fx, headPos: new THREE.Vector3(),
     sfx: sfxGame,
     touch(b, it) { b.gx.used.add(it.id); },
-    kill(b, why) { b.kill = true; b.state = 'dead'; if (b === S.shot) S.shotWhy = why; },
+    kill(b, why) {
+      if (b.kill) return;
+      const gx = b.gx;
+      if (gx && gx.safe > time) return;
+      if (gx && b.law.shield && !gx.popped) { // the shield takes it
+        gx.popped = true; gx.safe = time + 0.5;
+        fx.burst(b.pos, '#59f0d0', { count: 50, speed: 2.4, life: 0.5, gravity: 0 });
+        sfxGame('glass', b.pos);
+        return;
+      }
+      end(b, why);
+    },
     pellet(pos, vel) { spawnPellet(pos, vel); },
     shatter(it) {
       fx.burst(it.pos, '#cff6ff', { count: 70, speed: 2.2, life: 0.7, gravity: -5 });
@@ -58,6 +71,8 @@ export function createGame(api) {
       removeItem(it);
     },
   };
+
+  function end(b, why = '') { b.kill = true; b.state = 'dead'; if (S.shots.includes(b)) S.shotWhy = why; }
 
   // ---------- world furniture: tee, target, banner, tablet, aim helpers ----------
   const tee = new THREE.Mesh(new THREE.PlaneGeometry(TEE_R * 2.3, TEE_R * 2.3), new THREE.MeshBasicMaterial({
@@ -180,18 +195,23 @@ export function createGame(api) {
   function clearCourse() { for (const it of [...S.items]) removeItem(it); }
 
   // ---------- physics hooks (called by the integrator in main.js) ----------
+  const _field = new THREE.Vector3();
   function timeScale(b) {
-    if (!b.gx) b.gx = { used: new Set(), hoops: new Set(), cd: new Map(), gadgetHits: 0 };
+    if (!b.gx) b.gx = { used: new Set(), hoops: new Set(), cd: new Map(), gadgetHits: 0, safe: 0, phaseItem: null, phased: false, popped: false };
     let s = 1;
     for (const it of S.items) if (it.def.timeScale) s = Math.min(s, it.def.timeScale(it, b, G));
     return s;
   }
   function fields(b, out) {
     if (!b.gx) return out;
+    const k = b.law.fieldScale ?? 1; // cannonballs shrug, floaters get thrown about
+    if (k !== 1) _field.set(0, 0, 0);
+    const acc = k !== 1 ? _field : out;
     for (const it of S.items) {
       const f = it.def.field;
-      if (f) f(it, b, out, G);
+      if (f) f(it, b, acc, G);
     }
+    if (k !== 1) out.addScaledVector(_field, k);
     return out;
   }
   function collide(b, cb) {
@@ -201,7 +221,15 @@ export function createGame(api) {
       const d = it.def;
       if (!d.collide) continue;
       const R = d.reach + b.r;
-      if (b.pos.distanceToSquared(it.pos) > R * R) continue;
+      const gx = b.gx;
+      if (b.pos.distanceToSquared(it.pos) > R * R) {
+        if (it === gx.phaseItem) gx.phased = true; // out the far side: solid from here on
+        continue;
+      }
+      if (b.law.phase) { // the first solid gadget a phase ball reaches does not exist for it
+        if (!gx.phaseItem) { gx.phaseItem = it; fx.burst(b.pos, '#b48cff', { count: 26, speed: 1, life: 0.4, gravity: 0 }); sfxGame('portal', b.pos); }
+        if (it === gx.phaseItem) continue;
+      }
       d.collide(it, b, cb, G);
       if (b.kill) break;
     }
@@ -219,7 +247,7 @@ export function createGame(api) {
       d.post(it, b, G);
       if (b.kill) return;
     }
-    if (b === S.shot && S.state === 'shoot' && S.target) {
+    if (S.state === 'shoot' && S.target && S.shots.includes(b)) {
       _p.copy(b.pos).sub(S.target.pos).applyQuaternion(S.target.inv);
       if (Math.abs(_p.z) < b.r + 0.03 && _p.x * _p.x + _p.y * _p.y < (TARGET_R + b.r * 0.45) ** 2) scored(b);
     }
@@ -268,7 +296,7 @@ export function createGame(api) {
   }
   function advance(forcePass = false) {
     S.step++;
-    S.shot = null;
+    S.shots = [];
     const st = S.steps[S.step];
     if (!st) return gameOver();
     const change = forcePass || st.p !== S.cur || S.step === 0;
@@ -277,7 +305,7 @@ export function createGame(api) {
     const what = st.type === 'build' ? 'BUILD' : 'SHOOT';
     const lines = st.type === 'build'
       ? [`You have $${cash}. Buy gadgets and leave them on the course.`, st.round === 0 ? 'Opening build: nobody has shot yet.' : 'Whatever you leave, they shoot through next. So do you, later.']
-      : [`${SHOTS} shots from the tee. First-shot hit pays ${HIT_POINTS[0]}; every gadget your shot touches adds 50.`];
+      : [`${SHOTS} shots from the tee. First-shot hit pays ${HIT_POINTS[0]}; every gadget your shot touches adds 50.`, 'A / B picks the ball. The clever ones cost money.'];
     if (change) {
       S.state = 'pass';
       say(`${P().name}: ${what}`, [S.step === 0 ? 'Player 1 has the headset.' : `Hand the headset to ${P().name}.`, ...lines], { footer: 'TRIGGER when ready', color: P().color, modal: true });
@@ -293,7 +321,7 @@ export function createGame(api) {
     S.note = '';
     if (st.income) P().cash += st.income;
     if (st.type === 'build') { S.placed = []; S.pending = null; S.sel = 0; S.dist = 1.2; S.yaw = 0; }
-    else { S.shotsLeft = SHOTS; S.shotN = 0; api.clearAll(); }
+    else { S.shotsLeft = SHOTS; S.shotN = 0; S.ball = 0; api.clearAll(); }
   }
   function gameOver() {
     S.state = 'over';
@@ -316,7 +344,7 @@ export function createGame(api) {
     const base = HIT_POINTS[S.shotN - 1] ?? 100;
     const gadgets = Math.min(6, gx.used.size - gx.hoops.size) * 50;
     const hoops = gx.hoops.size * 100;
-    const bank = b.hits - gx.gadgetHits > 0 ? 50 : 0;
+    const bank = b.hits - gx.gadgetHits > 0 ? (b.law.bank ?? 50) : 0;
     const total = base + gadgets + hoops + bank;
     P().score += total;
     const parts = [`shot ${S.shotN}: ${base}`];
@@ -332,13 +360,13 @@ export function createGame(api) {
     fx.ripple(c, _v.set(0, 0, 1).applyQuaternion(S.target.quat), GOLD, 1.2, 0.9);
     sfxGame('score', c);
     api.pulse('right', 1, 120);
-    G.kill(b, '');
-    S.shot = null;
+    for (const s of S.shots) end(s);
+    S.shots = [];
     S.shotsLeft = 0;
     S.wait = { t: time + 2.6, then: advance };
   }
   function missed(why) {
-    S.shot = null;
+    S.shots = [];
     S.note = `Shot ${S.shotN} ${why || 'missed'}.`;
     sfxGame('miss', G.headPos);
     if (S.shotsLeft <= 0) {
@@ -349,9 +377,12 @@ export function createGame(api) {
   }
 
   // main.js fired a shot for us
-  function onFire(b) {
+  function onFire(b, ray) {
     if (S.state !== 'shoot') return;
-    S.shot = b; S.shotN++; S.shotsLeft--; S.shotWhy = ''; S.note = '';
+    S.shots = [b]; S.shotN++; S.shotsLeft--; S.shotWhy = ''; S.note = '';
+    P().cash -= b.law.cost ?? 0;
+    // curveball: spin axis is the gun's right side, so it swerves toward the gun's top
+    if (ray) b.data.axis = new THREE.Vector3(1, 0, 0).applyQuaternion(ray.getWorldQuaternion(_q));
   }
 
   // ---------- build mode ----------
@@ -503,8 +534,7 @@ export function createGame(api) {
 
   const FLAGS_FREE = { fire: true, cycle: true, clear: true };
   const FLAGS_NONE = { fire: false, cycle: false, clear: false };
-  const FLAGS_AIM = { fire: false, cycle: true, clear: false };
-  const FLAGS_SHOOT = { fire: true, cycle: true, clear: false };
+  const FLAGS_SHOOT = { fire: true, cycle: false, clear: false };
 
   // env: { headPos, headFwd, raySpace, ready, presenting }
   function frame(dt, t, env) {
@@ -531,7 +561,7 @@ export function createGame(api) {
     if (S.wait) {
       if (t >= S.wait.t) { const f = S.wait.then; S.wait = null; f(); }
       layoutUI(env);
-      return S.state === 'shoot' ? FLAGS_AIM : FLAGS_NONE;
+      return FLAGS_NONE;
     }
     let flags = FLAGS_NONE;
     switch (S.state) {
@@ -587,16 +617,35 @@ export function createGame(api) {
       case 'shoot': {
         const inTee = Math.hypot(env.headPos.x - S.tee.x, env.headPos.z - S.tee.z) < TEE_R;
         S.inTee = inTee;
-        if (S.shot) {
-          const b = S.shot;
-          if (b.kill || !bodies.includes(b)) missed(S.shotWhy);
-          else if (inp.undo) { G.kill(b, 'called off'); missed('called off'); }
-          else if (b.age > SHOT_TIMEOUT) { G.kill(b, ''); missed('ran out of time'); }
-          else if (b.idle > 0.9) { G.kill(b, ''); missed('came to rest'); }
-          flags = FLAGS_AIM;
+        steer.set(0, 0, 0);
+        if (S.shots.length) {
+          for (const b of [...S.shots]) {
+            if (b.kill || !bodies.includes(b)) { S.shots.splice(S.shots.indexOf(b), 1); continue; }
+            if (inp.undo) end(b, 'called off');
+            else if (b.age > SHOT_TIMEOUT) end(b, 'ran out of time');
+            else if (b.idle > 0.9) end(b, 'came to rest');
+            else if (b.law.split && !b.noSplit && b.age > 0.33) { // scatter: two more, fanned out sideways
+              b.noSplit = true;
+              for (const a of [-0.2, 0.2]) {
+                _v.copy(b.vel).applyAxisAngle(UP, a);
+                const nb = api.fire(b.pos, _v, b.law, _v.length());
+                nb.noSplit = true;
+                S.shots.push(nb);
+              }
+              fx.burst(b.pos, b.law.color, { count: 30, speed: 1.5, life: 0.35, gravity: 0 });
+              sfxGame('tick', b.pos);
+            } else if (b.law.key === 'guided') { // stick steers across your view
+              _r.crossVectors(env.headFwd, UP).normalize();
+              steer.copy(_r).multiplyScalar(inp.rx).addScaledVector(_v.crossVectors(_r, env.headFwd), -inp.ry);
+            }
+          }
+          if (!S.shots.length) missed(S.shotWhy);
         } else if (S.shotsLeft > 0) {
-          flags = inTee ? FLAGS_SHOOT : FLAGS_AIM;
-          if (!inTee && inp.trigger) { S.note = 'Back to the tee to shoot.'; sfxGame('deny', G.headPos); }
+          if (inp.next || inp.prev) { S.ball = (S.ball + (inp.next ? 1 : BALLS.length - 1)) % BALLS.length; S.note = ''; sfxGame('tick', G.headPos); }
+          const broke = BALLS[S.ball].cost > P().cash;
+          flags = inTee && !broke ? FLAGS_SHOOT : FLAGS_NONE;
+          if (inp.trigger && !inTee) { S.note = 'Back to the tee to shoot.'; sfxGame('deny', G.headPos); }
+          else if (inp.trigger && broke) { S.note = `${BALLS[S.ball].name} costs $${BALLS[S.ball].cost}. You have $${P().cash}.`; sfxGame('deny', G.headPos); }
         }
         break;
       }
@@ -659,12 +708,12 @@ export function createGame(api) {
         hint: 'L stick / A B: browse · R stick: distance, turn · trigger: place · Y: undo',
       }));
     } else {
-      const sig = `score|${S.cur}|${S.players[0].score}|${S.players[1].score}|${S.players[0].cash}|${S.players[1].cash}|${S.shotsLeft}|${S.note}|${S.state}|${st.round}|${!!S.shot}`;
+      const sig = `score|${S.cur}|${S.players[0].score}|${S.players[1].score}|${S.players[0].cash}|${S.players[1].cash}|${S.shotsLeft}|${S.note}|${S.state}|${st.round}|${S.shots.length > 0}`;
       tablet.paint(sig, (g, w, h) => drawScore(g, w, h, {
         ...common, phase: S.state === 'over' ? 'FINAL' : 'SHOOT', shotsMax: SHOTS, shotsLeft: S.shotsLeft,
-        shotsText: S.shot ? 'shot in flight…' : `${S.shotsLeft} left`,
+        shotsText: S.shots.length ? 'shot in flight…' : `${S.shotsLeft} left`,
         note: S.note || (S.state === 'shoot' ? `Next hit pays ${HIT_POINTS[Math.min(S.shotN, SHOTS - 1)]} plus style.` : ''),
-        hint: 'trigger: fire · A B: change law · Y: call off a shot · L trigger: menu',
+        hint: 'trigger: fire · A B: change ball · Y: call off a shot · L trigger: menu',
       }));
     }
   }
@@ -678,9 +727,9 @@ export function createGame(api) {
       case 'pass': return `${P().name}: trigger when ready`;
       case 'build': return `${P().name} BUILD · $${P().cash} · shop is on your left hand`;
       case 'shoot':
-        if (S.shot) return `${P().name} · shot ${S.shotN} of ${SHOTS} in flight · Y calls it off`;
+        if (S.shots.length) return S.shots[0].law.key === 'guided' ? 'right stick steers · Y calls it off' : `${P().name} · shot ${S.shotN} of ${SHOTS} in flight · Y calls it off`;
         if (S.wait) return `${P().name} · ${S.note}`;
-        return S.inTee ? `${P().name} · shot ${S.shotN + 1} of ${SHOTS} · A/B law` : `${P().name} · back to the tee to shoot`;
+        return S.inTee ? `${P().name} · shot ${S.shotN + 1} of ${SHOTS} · $${P().cash} · A/B ball` : `${P().name} · back to the tee to shoot`;
       case 'over': return 'match over · trigger for menu';
       case 'sandbox': return null;
       default: return null;
@@ -690,11 +739,14 @@ export function createGame(api) {
   // one of every gadget, for shader warm-up
   function warmObjects(group) {
     for (const d of ITEMS) if (d.make) { group.add(d.make(false)); if (d.pair) group.add(d.make(true)); }
+    for (const b of BALLS) group.add(b.make().root);
   }
   const busy = () => S.match && S.state !== 'menu' && S.state !== 'sandbox' && S.state !== 'off';
 
   return {
-    warm: warmObjects, busy,
+    warm: warmObjects, busy, BALLS,
+    // what the gun is loaded with during a turn at the tee (null: the sandbox's laws)
+    ammo: () => (S.state === 'shoot' ? { law: BALLS[S.ball], i: S.ball, n: BALLS.length } : null),
     S, G, ITEMS, inject, frame, onFire, status, timeScale, fields, collide, postStep,
     addItem, removeItem, clearCourse, newMatch, advance, begin, openMenu,
     get banner() { return banner.sig; },

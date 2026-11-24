@@ -20,8 +20,8 @@ Controls (controllers required):
 | | Build | Shoot |
 | --- | --- | --- |
 | Right trigger | place the gadget | fire (only from the tee) |
-| A / B, or left stick | browse the shop | change the law the gun fires |
-| Right stick | push / pull, turn the gadget | |
+| A / B, or left stick | browse the shop | change the ball |
+| Right stick | push / pull, turn the gadget | steer a Guided shot |
 | Y | undo your last placement, full refund | call off a shot in flight |
 | Left trigger | menu | menu |
 
@@ -49,7 +49,21 @@ The shop is a tablet on your left controller. A gadget is held on the end of the
 | Antimatter gun | 50 | Turret that tracks shots and annihilates them |
 | Portal pair | 90 | In the orange end, out the blue |
 
-A new gadget is one entry in `src/game/items.js` (look, plus any of `collide`, `field`, `timeScale`, `post`, `update`). The match flow is `src/game/game.js`, the panels `src/game/ui.js`.
+Balls. At the tee the gun loads match balls instead of the sandbox's ten laws. The clever ones cost money, out of the same wallet you build with.
+
+| Ball | $ | Good for | Bad at |
+| --- | --- | --- | --- |
+| Standard | 0 | Baseline | Everything on the course works on it |
+| Superball | 5 | Banks: keeps its speed, bank bonus 150 instead of 50 | Hard to stop |
+| Cannonball | 10 | Ignores most of orbs, fans, mines, black holes; smashes glass | Slow, drops, dead on a bounce |
+| Floater | 10 | Quarter gravity, nearly straight flight | Fields throw it twice as hard |
+| Curveball | 10 | Bends toward the top of the gun: level = flat, rolled = round a wall | Spin dies on the first bounce |
+| Shielded | 15 | Survives one laser or antimatter round | Only one |
+| Scatter | 20 | Splits into three; any one scoring counts | Spread you do not control |
+| Phase | 25 | Passes through the first solid gadget it reaches | Solid after that; hazards still work |
+| Guided | 30 | Steer it for three seconds | Slow, so turrets and pendulums get a long look |
+
+A new ball is one entry in `src/game/balls.js`. A new gadget is one entry in `src/game/items.js` (look, plus any of `collide`, `field`, `timeScale`, `post`, `update`). The match flow is `src/game/game.js`, the panels `src/game/ui.js`.
 
 Smoothness notes: depth sampling (a GPU readback plus a few ms of CPU) runs at full rate only while scanning, and stops during a match or while anything is in flight; every material is drawn once at session start so shaders don't compile mid-game; additive glows leave framebuffer alpha alone so they don't punch dark holes in passthrough (`src/blend.js`).
 
