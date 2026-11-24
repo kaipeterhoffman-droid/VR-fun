@@ -9,8 +9,10 @@ import * as THREE from 'three';
 
 const N = 64; // readback grid
 const VOX = 0.06;
-const MAX_RANGE = 4.5;
-const SAMPLE_HZ = 6;
+const MAX_RANGE = 8; // anything the sensor reports at all
+const NEAR = 4.5; // fine voxels only up close, where depth is accurate
+export const COARSE = 0.12; // far points feed a coarse grid used for plane fitting
+const SAMPLE_HZ = 8;
 const OCC = 2; // hits before a voxel counts as solid
 const MAX_H = 12;
 
@@ -38,11 +40,17 @@ void main(){
   o = vec4(floor(mm / 256.0) / 255.0, mod(mm, 256.0) / 255.0, 1.0, 1.0);
 }`;
 
+export { VOX, OCC, key };
+
 export class DepthMap {
   constructor(renderer, scene) {
     this.renderer = renderer;
     this.scene = scene;
-    this.vox = new Map(); // key -> { h, nx, ny, nz, x, y, z }
+    this.vox = new Map(); // key -> { h, nx, ny, nz, x, y, z, explained }
+    this.coarse = new Map(); // key -> { w, sx, sy, sz, nx, ny, nz }  (12 cm cells, out to 8 m)
+    this.free = new Map(); // key -> times a sensor ray passed through this 12 cm cell
+    this.explain = null; // (worldX, worldY, worldZ) => true when a baked plane/box already covers it
+    this.bounds = new THREE.Box3();
     this.solid = 0;
     this.mode = 'waiting'; // waiting | gpu | cpu | unavailable
     this.lastSample = -1;
@@ -79,7 +87,11 @@ export class DepthMap {
 
   reset() {
     this.vox.clear();
+    this.coarse.clear();
+    this.free.clear();
+    this.bounds.makeEmpty();
     this.solid = 0;
+    this.explain = null;
   }
 
   // ---------- GPU readback ----------
@@ -170,7 +182,6 @@ export class DepthMap {
   // ---------- map update ----------
   update(time) {
     if (this.mode === 'unavailable') return;
-    if (time - this.lastSample < 1 / SAMPLE_HZ) return;
     const xr = this.renderer.xr;
     const frame = xr.getFrame?.();
     const ref = xr.getReferenceSpace?.();
@@ -183,6 +194,19 @@ export class DepthMap {
     const pose = frame.getViewerPose(ref);
     const view = pose?.views?.[0];
     if (!view) return;
+    // fast head motion smears depth against pose (ghost walls): wait for the head to settle
+    const t = pose.transform, o = t.orientation, pp = t.position;
+    const prev = this._prevPose;
+    if (prev) {
+      const dt = Math.max(1e-3, time - prev.time);
+      const dot = Math.min(1, Math.abs(o.x * prev.x + o.y * prev.y + o.z * prev.z + o.w * prev.w));
+      const ang = (2 * Math.acos(dot)) / dt; // rad/s
+      const lin = Math.hypot(pp.x - prev.px, pp.y - prev.py, pp.z - prev.pz) / dt;
+      if (ang > 1.6 || lin > 1.2) this.settleUntil = time + 0.2;
+    }
+    this._prevPose = { time, x: o.x, y: o.y, z: o.z, w: o.w, px: pp.x, py: pp.y, pz: pp.z };
+    if (time < (this.settleUntil || 0)) return;
+    if (time - this.lastSample < 1 / SAMPLE_HZ) return;
     this.lastSample = time;
     try {
       if (session.depthUsage === 'gpu-optimized') {
@@ -248,8 +272,24 @@ export class DepthMap {
             haveN = true;
           }
         }
-        this.hit(v, haveN ? n : null);
-        if ((i + j * 3) % 3 === 0) this.carve(v, depth[k]);
+        const dk = depth[k];
+        this.bounds.expandByPoint(v);
+        // flying pixels: at a silhouette the sensor blends near and far into a point in mid-air.
+        // Such a pixel still proves the space in front of it is empty, but it is not a surface.
+        const tol = 0.06 * dk + 0.03;
+        const edge = (i > 0 && Math.abs(depth[k - 1] - dk) > tol) || Math.abs(depth[k + 1] - dk) > tol ||
+          (j > 0 && Math.abs(depth[k - N] - dk) > tol) || Math.abs(depth[k + N] - dk) > tol;
+        if (edge) {
+          if ((i + j) % 2 === 0) this.carveFree(v, 0.15);
+          continue;
+        }
+        if (dk <= NEAR) {
+          this.hit(v, haveN ? n : null);
+          if ((i + j * 3) % 3 === 0) this.carve(v, dk);
+        } else if (haveN) {
+          this.hitCoarse(v, n);
+        }
+        if ((i + j) % 2 === 0) this.carveFree(v);
       }
     }
     if (this.inst.visible) this.rebuildView();
@@ -259,11 +299,48 @@ export class DepthMap {
     const x = Math.floor(p.x / VOX), y = Math.floor(p.y / VOX), z = Math.floor(p.z / VOX);
     const kk = key(x, y, z);
     let c = this.vox.get(kk);
-    if (!c) { c = { h: 0, nx: 0, ny: 0, nz: 0, x, y, z }; this.vox.set(kk, c); }
+    if (!c) {
+      c = { h: 0, nx: 0, ny: 0, nz: 0, x, y, z, explained: false };
+      if (this.explain) c.explained = this.explain((x + 0.5) * VOX, (y + 0.5) * VOX, (z + 0.5) * VOX);
+      this.vox.set(kk, c);
+    }
     const was = c.h >= OCC;
     c.h = Math.min(MAX_H, c.h + 1);
     if (!was && c.h >= OCC) this.solid++;
     if (n) { c.nx += n.x; c.ny += n.y; c.nz += n.z; }
+  }
+
+  hitCoarse(p, n) {
+    const x = Math.floor(p.x / COARSE), y = Math.floor(p.y / COARSE), z = Math.floor(p.z / COARSE);
+    const kk = key(x, y, z);
+    let c = this.coarse.get(kk);
+    if (!c) { c = { w: 0, sx: 0, sy: 0, sz: 0, nx: 0, ny: 0, nz: 0 }; this.coarse.set(kk, c); }
+    c.w++; c.sx += p.x; c.sy += p.y; c.sz += p.z; c.nx += n.x; c.ny += n.y; c.nz += n.z;
+  }
+
+  // coarse free-space memory: where have sensor rays actually passed through?
+  carveFree(p, short = 0) {
+    const dir = this._dir.subVectors(p, this.camPos);
+    const dist = dir.length();
+    const steps = Math.floor((dist - COARSE * 2 - short) / COARSE);
+    if (steps <= 0) return;
+    dir.multiplyScalar(1 / dist);
+    let lastKey = -1;
+    for (let s = 1; s < steps; s++) {
+      const t = s * COARSE;
+      const kk = key(
+        Math.floor((this.camPos.x + dir.x * t) / COARSE),
+        Math.floor((this.camPos.y + dir.y * t) / COARSE),
+        Math.floor((this.camPos.z + dir.z * t) / COARSE),
+      );
+      if (kk === lastKey) continue;
+      lastKey = kk;
+      this.free.set(kk, Math.min(255, (this.free.get(kk) || 0) + 1));
+    }
+  }
+
+  isSeenFree(x, y, z) {
+    return (this.free.get(key(Math.floor(x / COARSE), Math.floor(y / COARSE), Math.floor(z / COARSE))) || 0) >= 3;
   }
 
   // walk from the eye toward the measured point; anything in between is empty space
@@ -302,7 +379,7 @@ export class DepthMap {
     const n = this._n;
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
       const c = this.vox.get(key(x, y, z));
-      if (!c || c.h < OCC) continue;
+      if (!c || c.h < OCC || c.explained) continue;
       const cx = (x + 0.5) * VOX, cy = (y + 0.5) * VOX, cz = (z + 0.5) * VOX;
       const d = Math.hypot(pos.x - cx, pos.y - cy, pos.z - cz);
       if (d > reach) continue;

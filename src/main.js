@@ -7,6 +7,7 @@ import { makeGunCard } from './textures.js';
 import { rebuildSurfaces, collideRoom, hasRoom, roomStats } from './collide.js';
 import { FX, Trail } from './fx.js';
 import { DepthMap } from './depthmap.js';
+import { RoomModel } from './roommodel.js';
 import { initAudio, updateListener, sfxFire, sfxImpact, sfxRewind, sfxClick, sfxVanish } from './audio.js';
 
 export const ROOM = { killRadius: 14, killHeight: 7 };
@@ -64,7 +65,23 @@ scene.add(sun);
 
 const fx = new FX(scene);
 const depthMap = new DepthMap(world.renderer, scene);
-world.renderer.xr.addEventListener('sessionend', () => depthMap.reset());
+const room = new RoomModel(scene);
+// scan phase: walk around while the depth map fills in, press A to bake it into walls + boxes
+let scanPreview = 0, scanPlanes = 0;
+function rescan() {
+  depthMap.reset();
+  room.reset();
+  scanPreview = 0;
+  scanPlanes = 0;
+  window.dispatchEvent(new CustomEvent('room-rescan'));
+}
+function bakeRoom(now) {
+  room.bake(depthMap, now);
+  depthMap.setVisible(false, 0, now);
+  window.dispatchEvent(new CustomEvent('room-baked', { detail: room.counts })); // other modes can start now
+}
+const scanning = () => depthMap.active && !room.baked;
+world.renderer.xr.addEventListener('sessionend', rescan);
 
 // ---------- gun ----------
 const gun = new THREE.Group();
@@ -161,7 +178,13 @@ function setMode(i) {
 function statusLine() {
   if (!world.renderer.xr.isPresenting) return 'trigger fire · A/B cycle · Y clear · stick-click: show room map';
   if (depthMap.mode === 'gpu' || depthMap.mode === 'cpu') {
-    return depthMap.active ? `live depth map · ${Math.round(depthMap.solid / 100) / 10}k voxels · stick-click to view` : 'mapping your room: look around';
+    if (room.baked) {
+      const c = room.counts;
+      return `room: ${c.wall} walls · ${c.boxes} boxes · stick-click view · hold Y rescan`;
+    }
+    return depthMap.active
+      ? `SCANNING · walk the room · ${Math.round(depthMap.solid / 100) / 10}k vox · ${scanPlanes} planes · A = done`
+      : 'SCANNING · look around the room';
   }
   if (depthMap.mode === 'waiting') return 'starting depth sensor…';
   if (!hasRoom()) return captureAsked ? 'still no room scan: check Settings > Privacy > Spatial data' : 'no room scan: click thumbstick to scan your room';
@@ -273,7 +296,11 @@ function collide(b, ctx) {
   const cb = (n, pen) => contact(b, n, pen, ctx);
   // our live depth map wins; the headset's scan is the fallback
   const mapped = depthMap.active;
-  if (mapped) {
+  if (room.baked) {
+    room.collide(b.pos, b.r, cb); // inferred walls/floor/ceiling + furniture boxes
+    depthMap.collide(b.pos, b.r, cb); // whatever the model doesn't explain (new clutter, people, odd shapes)
+    collideRoom(b.pos, b.r, cb, true);
+  } else if (mapped) {
     depthMap.collide(b.pos, b.r, cb); // furniture, clutter, people: anything the sensor has seen
     collideRoom(b.pos, b.r, cb, true); // plus the room's own walls/floor/ceiling, so nothing leaks out of unseen corners
   } else collideRoom(b.pos, b.r, cb);
@@ -300,6 +327,12 @@ function pulse(side, strength, ms) {
 let captureAsked = false;
 let viewTime = 0;
 function toggleRoomView() {
+  if (room.baked) {
+    const on = !room.viz.visible || room.vizUntil > 0;
+    room.showViz(on, viewTime, 0);
+    depthMap.setVisible(on, 0, viewTime);
+    return;
+  }
   if (depthMap.mode === 'gpu' || depthMap.mode === 'cpu') {
     depthMap.setVisible(!depthMap.show || depthMap.showUntil > 0, 0, viewTime);
     return;
@@ -315,6 +348,7 @@ function toggleRoomView() {
 }
 
 let fireCooldown = 0;
+let yHeld = 0;
 const lastReplayDir = new Map();
 class WeirdPhysicsSystem extends createSystem({
   planes: { required: [XRPlane] },
@@ -328,6 +362,11 @@ class WeirdPhysicsSystem extends createSystem({
     depthMap.update(time);
     if (before === 'waiting' && (depthMap.mode === 'gpu' || depthMap.mode === 'cpu')) depthMap.setVisible(true, 8, time); // show the scan building
     depthMap.tick(time);
+    room.tick(time);
+    if (scanning()) {
+      if (!depthMap.show) depthMap.setVisible(true, 0, time); // keep the voxels up while scanning
+      if (time > scanPreview) { scanPreview = time + 1.5; scanPlanes = room.preview(depthMap); }
+    }
     const player = world.player;
     player.head.getWorldPosition(headPos);
     player.head.getWorldDirection(headFwd).negate();
@@ -347,9 +386,13 @@ class WeirdPhysicsSystem extends createSystem({
 
     const xr = world.input.xr;
     const pads = xr.gamepads;
-    if (pads.right?.getButtonDown('a-button') || pads.left?.getButtonDown('x-button')) { setMode(mode + 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, true); }
+    const bakeNow = scanning() && pads.right?.getButtonDown('a-button');
+    if (bakeNow) { bakeRoom(time); pulse(gunSide, 0.8, 60); sfxClick(headPos, true); cardDirty = true; }
+    else if (pads.right?.getButtonDown('a-button') || pads.left?.getButtonDown('x-button')) { setMode(mode + 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, true); }
     if (pads.right?.getButtonDown('b-button')) { setMode(mode - 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, false); }
-    if (pads.left?.getButtonDown('y-button')) clearAll();
+    if (pads.left?.getButtonDown('y-button')) { clearAll(); yHeld = time; }
+    if (yHeld && !pads.left?.getButtonPressed('y-button')) yHeld = 0;
+    if (yHeld && time - yHeld > 1 && room.baked) { yHeld = 0; rescan(); pulse('left', 0.8, 80); sfxRewind(headPos); }
     if (pads.left?.getButtonDown('xr-standard-thumbstick') || pads.right?.getButtonDown('xr-standard-thumbstick')) toggleRoomView();
 
     let wantFire = false;
@@ -361,7 +404,10 @@ class WeirdPhysicsSystem extends createSystem({
       if (gp.getButtonDown('xr-standard-trigger')) { wantFire = true; fireCooldown = 0.35; }
       else if (gp.getButtonPressed('xr-standard-trigger') && fireCooldown <= 0) { wantFire = true; fireCooldown = 0.15; }
     }
-    if (xr.isPrimary('hand', 'left') && xr.getSelectState('left').start) { setMode(mode + 1); sfxClick(headPos, true); }
+    if (xr.isPrimary('hand', 'left') && xr.getSelectState('left').start) {
+      if (scanning()) bakeRoom(time); else setMode(mode + 1);
+      sfxClick(headPos, true);
+    }
 
     if (wantFire) {
       muzzle.getWorldPosition(muzzlePos);
@@ -459,4 +505,4 @@ class WeirdPhysicsSystem extends createSystem({
 
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { world, bodies, depthMap, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
+window.__weird = { world, bodies, depthMap, room, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };

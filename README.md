@@ -6,9 +6,17 @@ WebXR toys for Quest 3, built on Meta's Immersive Web SDK.
 
 ## Weird Physics gun (passthrough)
 
-You stand in your real room holding a blaster that fires objects, each obeying a different broken law. Shots pass through each other but hit your real room. The game builds its own live map from the Quest 3 depth sensor: a 6 cm voxel grid with surface normals, updated six times a second as you look around, with free space carved out so moved objects disappear. Irregular shapes work because anything the sensor has seen is solid. Quest's wall/floor/ceiling planes back it up for corners you haven't looked at; if depth sensing is unavailable it falls back to Quest's room scan. Every law bounces in its own way.
+You stand in your real room holding a blaster that fires objects, each obeying a different broken law. Shots pass through each other but hit your real room. Every law bounces in its own way.
 
-Controls: trigger fires (hold for auto), A / X next law, B previous, Y clears, thumbstick click shows the live room map. Bare hands: right pinch fires, left pinch cycles. The card above the gun shows the loaded law and whether a room scan was found.
+**Scan first.** The game maps the room itself from the Quest 3 depth sensor. Walk around and look at the walls, the ceiling and the furniture while voxels pile up, then press A (or left pinch) to bake:
+
+- floor, ceiling and walls are fitted as planes from near points and far, coarse ones (out to ~8 m). Walls are treated as infinite, so a wall hidden behind a couch is still there, and they're only cut where the sensor has actually seen through them (doorways, open windows). Vertical faces with room behind them (couch backs, counters) stay finite
+- furniture voxels become boxes via a 12 cm height map; things with a gap underneath (tables, shelves, lamps) float, so shots can roll under them
+- flicker, flying pixels at silhouettes and samples taken during fast head turns are rejected; anything left over that the model doesn't explain still collides as raw voxels
+
+Hold Y for a second to rescan. If depth sensing is unavailable it falls back to Quest's room scan.
+
+Controls: trigger fires (hold for auto), A / X next law (A bakes the scan while scanning), B previous, Y clears (hold to rescan), thumbstick click shows the room model. Bare hands: right pinch fires, left pinch cycles. The card above the gun shows the loaded law and whether a room scan was found.
 
 | Law | In flight | On impact |
 | --- | --- | --- |
