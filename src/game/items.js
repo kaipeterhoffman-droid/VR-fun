@@ -188,6 +188,7 @@ export const ITEMS = [
       const pen = boxHit(toLocal(it, b.pos, _p), b.r, 0.35, 0.25, 0.01, _n);
       if (!pen) return;
       const hard = b.vel.lengthSq() > 1;
+      if (hard && b.law.smash) { G.touch(b, it); G.shatter(it); return; } // cannonball: straight through
       bounce(b, _n.applyQuaternion(it.quat), pen, cb);
       G.touch(b, it);
       if (hard) { b.vel.multiplyScalar(0.35); G.shatter(it); }
@@ -261,7 +262,8 @@ export const ITEMS = [
       if (b.pos.distanceToSquared(it.pos) > R * R) return;
       it.data.rearm = G.time + 3;
       _v.subVectors(b.pos, it.pos).normalize();
-      b.vel.multiplyScalar(0.3).addScaledVector(_v, 8);
+      const k = b.law.fieldScale ?? 1;
+      b.vel.multiplyScalar(1 - 0.7 * Math.min(1, k)).addScaledVector(_v, 8 * k);
       G.touch(b, it);
       G.fx.burst(it.pos, '#ffb060', { count: 60, speed: 3.2, life: 0.5, gravity: -1 });
       G.fx.burst(it.pos, '#ff4a4a', { count: 30, speed: 1.4, life: 0.7, gravity: 0 });

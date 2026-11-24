@@ -203,9 +203,14 @@ let mode = 0;
 let cardDirty = true;
 let cardPulse = 0;
 let lastStats = '';
+let shown = null; // what the gun is currently dressed as: a sandbox law, or a match ball
 function setMode(i) {
   mode = (i + LAWS.length) % LAWS.length;
-  const c = new THREE.Color(LAWS[mode].color);
+  dressGun(LAWS[mode]);
+}
+function dressGun(law) {
+  shown = law;
+  const c = new THREE.Color(law.color);
   muzzleRing.material.color.copy(c);
   muzzleRing.material.emissive.copy(c);
   chamber.material.color.copy(c);
@@ -271,8 +276,9 @@ function clearAll() {
 const tmpV = new THREE.Vector3();
 const tmpQ = new THREE.Quaternion();
 
-function fire(origin, dir, lawIndex = mode, speed = MUZZLE_SPEED) {
-  const law = LAWS[lawIndex];
+function fire(origin, dir, lawIndex = mode, speed) {
+  const law = typeof lawIndex === 'number' ? LAWS[lawIndex] : lawIndex; // a sandbox law by index, or a match ball
+  speed ??= law.speed ?? MUZZLE_SPEED;
   const { root, mat } = law.make(THREE);
   root.position.copy(origin);
   scene.add(root);
@@ -498,10 +504,10 @@ class WeirdPhysicsSystem extends createSystem({
     if (wantFire && flags.fire) {
       muzzle.getWorldPosition(muzzlePos);
       raySpace.getWorldDirection(muzzleDir).negate();
-      game.onFire(fire(muzzlePos, muzzleDir));
-      fx.burst(muzzlePos, LAWS[mode].color, { count: 14, speed: 1.4, normal: muzzleDir, spread: 0.35, life: 0.25, gravity: 0, drag: 6 });
-      fx.ripple(muzzlePos, muzzleDir, LAWS[mode].color, 0.09, 0.18);
-      sfxFire(LAWS[mode].key, muzzlePos);
+      game.onFire(fire(muzzlePos, muzzleDir, shown), raySpace);
+      fx.burst(muzzlePos, shown.color, { count: 14, speed: 1.4, normal: muzzleDir, spread: 0.35, life: 0.25, gravity: 0, drag: 6 });
+      fx.ripple(muzzlePos, muzzleDir, shown.color, 0.09, 0.18);
+      sfxFire(shown.key, muzzlePos);
       pulse(gunSide, 0.55, 35);
       gun.position.z = 0.03; // recoil
       gun.rotation.x = 0.12;
@@ -511,7 +517,10 @@ class WeirdPhysicsSystem extends createSystem({
 
     // card + chamber life
     const st = statusLine();
-    if (cardDirty || st !== lastStats) { drawCard(LAWS[mode], mode, LAWS.length, st); cardDirty = false; lastStats = st; }
+    const ammo = game.ammo(); // at the tee the gun holds match balls, otherwise the sandbox laws
+    const want = ammo ? ammo.law : LAWS[mode];
+    if (want !== shown) dressGun(want);
+    if (cardDirty || st !== lastStats) { drawCard(shown, ammo ? ammo.i : mode, ammo ? ammo.n : LAWS.length, st); cardDirty = false; lastStats = st; }
     cardPulse = Math.max(0, cardPulse - dt * 3);
     card.scale.setScalar(1 + cardPulse * 0.12);
     chamber.rotation.y += dt * 2;
@@ -590,7 +599,7 @@ class WeirdPhysicsSystem extends createSystem({
 
 fixAdditive(scene);
 fixAdditive(gun);
-const game = createGame({ world, scene, fx, bodies, clearAll, pulse });
+const game = createGame({ world, scene, fx, bodies, clearAll, pulse, fire });
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
 window.__weird = { game, fx, world, bodies, depthMap, room, store, exportSaved, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };

@@ -131,7 +131,11 @@ export function makeGunCard() {
     g.font = '500 30px system-ui, sans-serif';
     const lines = wrap(g, law.blurb, 580).slice(0, 2);
     lines.forEach((l, i) => g.fillText(l, 320, 158 + i * 36));
-    if (law.surfaceNote) {
+    if (law.note) {
+      g.fillStyle = law.color;
+      g.font = '700 30px system-ui, sans-serif';
+      g.fillText(law.note, 320, 158 + lines.length * 36 + 14);
+    } else if (law.surfaceNote) {
       g.fillStyle = law.color;
       g.font = 'italic 500 27px system-ui, sans-serif';
       g.fillText('on impact: ' + law.surfaceNote, 320, 158 + lines.length * 36 + 14);
