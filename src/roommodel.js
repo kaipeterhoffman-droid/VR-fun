@@ -5,13 +5,15 @@
 //  - furniture voxels squashed into a height map and merged into solid boxes
 // Everything is fitted from the depth map's own data; nothing comes from Quest's room scan.
 import * as THREE from 'three';
-import { VOX, OCC, COARSE } from './depthmap.js';
+import { VOX, OCC, COARSE, key } from './depthmap.js';
 
 const MIN_WALL_AREA = 0.9; // m² of evidence before a vertical surface counts as a wall
 const MIN_FLOOR_AREA = 0.25;
 const MIN_CEIL_AREA = 0.4;
 const FURNITURE_MAX_H = 2.2;
-const MAX_BOXES = 500;
+const MAX_BOXES = 2000;
+const GRID = 1; // m, spatial index cell for boxes
+const WALL_REACH = 1.5; // how far a wall is assumed to continue past where you actually saw it
 
 export class RoomModel {
   constructor(scene) {
@@ -29,6 +31,10 @@ export class RoomModel {
   }
 
   reset() {
+    this.setFrame(null);
+    this.map = null;
+    this.grid = null;
+    this.ceilY = undefined;
     this.planes = [];
     this.boxes = [];
     this.baked = false;
@@ -36,15 +42,19 @@ export class RoomModel {
   }
 
   // ---------- samples ----------
-  samples(map) {
+  // max: subsample for quick previews so the scan stays smooth in big houses
+  samples(map, max = Infinity) {
     const out = [];
+    const stride = Math.max(1, Math.ceil(map.vox.size / max));
+    let i = 0;
     for (const c of map.vox.values()) {
+      if (stride > 1 && (i++ % stride)) continue;
       if (c.h < OCC) continue;
       const L = Math.hypot(c.nx, c.ny, c.nz);
       if (L < 1e-6) continue;
       out.push({
         x: (c.x + 0.5) * VOX, y: (c.y + 0.5) * VOX, z: (c.z + 0.5) * VOX,
-        nx: c.nx / L, ny: c.ny / L, nz: c.nz / L, w: VOX * VOX,
+        nx: c.nx / L, ny: c.ny / L, nz: c.nz / L, w: VOX * VOX * stride,
       });
     }
     for (const c of map.coarse.values()) {
@@ -60,8 +70,9 @@ export class RoomModel {
   }
 
   // ---------- plane fitting ----------
-  fitPlanes(map) {
-    const S = this.samples(map);
+  fitPlanes(map, max) {
+    this.ceilY = undefined;
+    const S = this.samples(map, max);
     const planes = [];
 
     // horizontal: histogram heights of up-facing and down-facing patches
@@ -89,11 +100,20 @@ export class RoomModel {
     const f = peak(up, (y) => y < 0.45 && y > -0.6);
     this.floorY = f.y !== null && f.area > MIN_FLOOR_AREA ? refineY(f.y, 1) : 0;
     planes.push(this.makePlane(new THREE.Vector3(0, 1, 0), this.floorY, 'floor', S));
-    const c = peak(down, (y) => y > this.floorY + 1.7);
-    if (c.y !== null && c.area > MIN_CEIL_AREA) {
-      const cy = refineY(c.y, -1);
-      planes.push(this.makePlane(new THREE.Vector3(0, -1, 0), -cy, 'ceiling', S));
+    // ceilings: houses have several heights. The biggest is the main ceiling (infinite, cut where
+    // rays went above it); other big flat undersides become bounded patches.
+    const ceils = [];
+    for (;;) {
+      const c = peak(down, (y) => y > this.floorY + 1.7 && !ceils.some((q) => Math.abs(q - y) < 0.3));
+      if (c.y === null || c.area < MIN_CEIL_AREA || ceils.length >= 4) break;
+      ceils.push(c.y);
     }
+    ceils.forEach((y0, i) => {
+      const cy = refineY(y0, -1);
+      const pl = this.makePlane(new THREE.Vector3(0, -1, 0), -cy, i ? 'face' : 'ceiling', S);
+      if (i) { pl.uMin -= 0.3; pl.uMax += 0.3; pl.vMin -= 0.3; pl.vMax += 0.3; } else this.ceilY = cy;
+      planes.push(pl);
+    });
 
     // vertical: Hough-style vote over (facing direction, offset)
     const TH = 3 * Math.PI / 180, DB = 0.04;
@@ -147,12 +167,52 @@ export class RoomModel {
         const t = n.x * q.x + n.z * q.z - dd;
         if (t > 0.3) front += q.w; else if (t < -0.3) behind += q.w;
       }
-      const shell = behind < 0.15 * front || behind < 0.3;
+      let shell = behind < 0.15 * front || behind < 0.3;
       const pl = this.makePlane(n, dd, shell ? 'wall' : 'face', S);
+      if (shell) {
+        // if the sensor has looked straight through much of where this wall would be, it isn't a wall
+        let tot = 0, thru = 0;
+        const top = this.ceilY ?? this.floorY + 2.4;
+        for (let a = pl.uMin - WALL_REACH; a <= pl.uMax + WALL_REACH; a += 0.24) {
+          for (let y = this.floorY + 0.3; y < top - 0.2; y += 0.24) {
+            const qx = pl.u.x * a + n.x * dd, qz = pl.u.z * a + n.z * dd;
+            tot++;
+            if (this.seenThrough(map, n, qx, y, qz)) thru++;
+          }
+        }
+        if (tot && thru / tot > 0.3) {
+          shell = false;
+          pl.kind = 'face';
+        }
+      }
+      if (shell) pl.kind = 'wall';
       if (!shell) { pl.uMin -= 0.08; pl.uMax += 0.08; pl.vMin -= 0.08; pl.vMax += 0.08; }
       planes.push(pl);
     }
+    if (this.ceilY === undefined) {
+      // never got a clean look at the ceiling: walls go up to it, so use the highest wall evidence
+      let top = -Infinity;
+      for (const p of planes) if (p.kind === 'wall') top = Math.max(top, p.vMax);
+      if (top > this.floorY + 2.0) {
+        this.ceilY = top + 0.05;
+        planes.push(this.makePlane(new THREE.Vector3(0, -1, 0), -this.ceilY, 'ceiling', S));
+      }
+    }
     return planes;
+  }
+
+  // far surfaces only live in the coarse grid; give them real voxels so shots bounce off them too
+  promoteCoarse(map) {
+    for (const c of map.coarse.values()) {
+      if (c.w < 3) continue;
+      const L = Math.hypot(c.nx, c.ny, c.nz);
+      if (L < 1e-6 || L / c.w < 0.6) continue;
+      const x = c.sx / c.w, y = c.sy / c.w, z = c.sz / c.w;
+      if (map.freeCount(x, y, z) >= 4) continue;
+      const n = this._q.set(c.nx / L, c.ny / L, c.nz / L);
+      const p = this._p.set(x, y, z);
+      for (let k = 0; k < 3; k++) map.hit(p, n);
+    }
   }
 
   makePlane(n, d, kind, S) {
@@ -283,6 +343,18 @@ export class RoomModel {
     return boxes;
   }
 
+  // has a depth ray passed through this spot of a plane (n faces the room)?
+  seenThrough(map, n, x, y, z) {
+    // look behind the plane: rays grazing along a wall carve the space in front of it, but only a
+    // ray that went through an opening can carve space on the far side
+    return map.freeCount(x - n.x * 0.3, y - n.y * 0.3, z - n.z * 0.3) >= 2;
+  }
+
+  inWallReach(p, x, y, z) {
+    const a = p.u.x * x + p.u.y * y + p.u.z * z;
+    return a > p.uMin - WALL_REACH && a < p.uMax + WALL_REACH;
+  }
+
   inFace(p, x, y, z) {
     const a = p.u.x * x + p.u.y * y + p.u.z * z, b = p.v.x * x + p.v.y * y + p.v.z * z;
     return a > p.uMin && a < p.uMax && b > p.vMin && b < p.vMax;
@@ -291,13 +363,31 @@ export class RoomModel {
   nearPlane(x, y, z, tol) {
     for (const p of this.planes) {
       const s = p.n.x * x + p.n.y * y + p.n.z * z - p.d;
-      if (Math.abs(s) < tol && (p.kind !== 'face' || this.inFace(p, x, y, z))) return true;
+      if (Math.abs(s) < tol && (p.kind === 'face' ? this.inFace(p, x, y, z) : p.kind !== 'wall' || this.inWallReach(p, x, y, z))) return true;
     }
     return false;
   }
 
-  inBox(x, y, z, pad) {
+  indexBoxes() {
+    this.grid = new Map();
     for (const b of this.boxes) {
+      for (let gx = Math.floor((b.min.x - 0.3) / GRID); gx <= Math.floor((b.max.x + 0.3) / GRID); gx++) {
+        for (let gz = Math.floor((b.min.z - 0.3) / GRID); gz <= Math.floor((b.max.z + 0.3) / GRID); gz++) {
+          const k = gx * 10000 + gz;
+          let l = this.grid.get(k);
+          if (!l) this.grid.set(k, (l = []));
+          l.push(b);
+        }
+      }
+    }
+  }
+
+  boxesNear(x, z) {
+    return this.grid?.get(Math.floor(x / GRID) * 10000 + Math.floor(z / GRID)) || EMPTY;
+  }
+
+  inBox(x, y, z, pad) {
+    for (const b of this.boxesNear(x, z)) {
       if (x > b.min.x - pad && x < b.max.x + pad && y > b.min.y - pad && y < b.max.y + pad && z > b.min.z - pad && z < b.max.z + pad) return true;
     }
     return false;
@@ -305,7 +395,10 @@ export class RoomModel {
 
   // ---------- bake ----------
   preview(map) {
-    this.planes = this.fitPlanes(map);
+    const t0 = performance.now();
+    this.promoteCoarse(map);
+    this.planes = this.fitPlanes(map, 12000);
+    this.previewMs = performance.now() - t0;
     return this.planes.length;
   }
 
@@ -322,34 +415,104 @@ export class RoomModel {
       if (c.h < 4 && map.isSeenFree((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX)) { if (c.h >= OCC) map.solid--; map.vox.delete(k); pruned++; }
     }
     this.pruned = pruned;
+    this.promoteCoarse(map);
     this.planes = this.fitPlanes(map);
     this.boxes = this.buildBoxes(map);
+    this.indexBoxes();
     this.baked = true;
     // raw voxels that the model now covers stop colliding on their own (smoother bounces)
     const explain = (x, y, z) => this.nearPlane(x, y, z, 0.13) || this.inBox(x, y, z, VOX);
     for (const c of map.vox.values()) c.explained = explain((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX);
     map.explain = explain;
     this.map = map;
+    this.setFrame(null);
     this.buildViz();
     this.showViz(true, now, 6);
   }
 
   // ---------- collision ----------
+  // a room loaded from a previous session lives in its own frame (pinned to a persistent anchor)
+  setFrame(m) {
+    if (!m) { this.xf = this.ixf = null; this.viz.matrixAutoUpdate = true; return; }
+    this.xf = (this.xf || new THREE.Matrix4()).copy(m);
+    this.ixf = (this.ixf || new THREE.Matrix4()).copy(m).invert();
+    this.xq = (this.xq || new THREE.Quaternion()).setFromRotationMatrix(m);
+    this.viz.matrixAutoUpdate = false;
+    this.viz.matrix.copy(m);
+    this.viz.matrixWorldNeedsUpdate = true;
+  }
+
   collide(pos, r, contact) {
     if (!this.baked) return;
+    if (!this.xf) return this.collideLocal(pos, r, contact);
+    const lp = (this._lp ||= new THREE.Vector3()).copy(pos).applyMatrix4(this.ixf);
+    const q = this.xq;
+    this.collideLocal(lp, r, (n, pen, kind) => {
+      contact(n.applyQuaternion(q), pen, kind);
+      lp.copy(pos).applyMatrix4(this.ixf); // contact moved the shot
+    });
+  }
+
+  explainWorld(x, y, z) {
+    const p = this._ep ||= new THREE.Vector3();
+    p.set(x, y, z);
+    if (this.xf) p.applyMatrix4(this.ixf);
+    return this.nearPlane(p.x, p.y, p.z, 0.13) || this.inBox(p.x, p.y, p.z, VOX);
+  }
+
+  // ---------- save / load ----------
+  serialize() {
+    const free = this.map.free;
+    const keys = new Int32Array(free.size), counts = new Uint8Array(free.size);
+    let i = 0;
+    for (const [k, c] of free) { keys[i] = k; counts[i++] = c; }
+    return {
+      v: 1, floorY: this.floorY, ceilY: this.ceilY,
+      planes: this.planes.map((p) => ({ n: p.n.toArray(), d: p.d, kind: p.kind, u: p.u.toArray(), v: p.v.toArray(), uMin: p.uMin, uMax: p.uMax, vMin: p.vMin, vMax: p.vMax })),
+      boxes: this.boxes.map((b) => [...b.min.toArray(), ...b.max.toArray(), b.floats ? 1 : 0]),
+      freeKeys: keys, freeCounts: counts,
+    };
+  }
+
+  load(data, map, now) {
+    this.floorY = data.floorY;
+    this.ceilY = data.ceilY;
+    const V = (a) => new THREE.Vector3().fromArray(a);
+    this.planes = data.planes.map((p) => ({ ...p, n: V(p.n), u: V(p.u), v: V(p.v) }));
+    this.boxes = data.boxes.map((a) => {
+      const b = new THREE.Box3(V(a.slice(0, 3)), V(a.slice(3, 6)));
+      b.floats = !!a[6];
+      return b;
+    });
+    this.indexBoxes();
+    const free = new Map();
+    for (let i = 0; i < data.freeKeys.length; i++) free.set(data.freeKeys[i], data.freeCounts[i]);
+    this.map = {
+      free,
+      freeCount: (x, y, z) => free.get(key(Math.floor(x / COARSE), Math.floor(y / COARSE), Math.floor(z / COARSE))) || 0,
+    };
+    this.baked = true;
+    const explain = (x, y, z) => this.explainWorld(x, y, z);
+    for (const c of map.vox.values()) c.explained = explain((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX);
+    map.explain = explain;
+    this.buildViz();
+    this.showViz(true, now, 6);
+  }
+
+  collideLocal(pos, r, contact) {
     const n = this._q;
     for (const p of this.planes) {
       const s = p.n.x * pos.x + p.n.y * pos.y + p.n.z * pos.z - p.d;
       if (s >= r || s < -0.3) continue;
       if (p.kind === 'face' && !this.inFace(p, pos.x, pos.y, pos.z)) continue;
       // openings: if sensor rays have passed through this spot of the plane, it's not solid there
-      if (p.kind === 'wall' && this.map) {
+      if ((p.kind === 'wall' || p.kind === 'ceiling') && this.map) {
         const qx = pos.x - p.n.x * s, qy = pos.y - p.n.y * s, qz = pos.z - p.n.z * s;
-        if (this.map.isSeenFree(qx, qy, qz)) continue;
+        if ((p.kind === 'wall' && !this.inWallReach(p, qx, qy, qz)) || this.seenThrough(this.map, p.n, qx, qy, qz)) continue;
       }
       contact(n.copy(p.n), r - s, p.kind);
     }
-    for (const b of this.boxes) {
+    for (const b of this.boxesNear(pos.x, pos.z)) {
       if (pos.x < b.min.x - r || pos.x > b.max.x + r || pos.y < b.min.y - r || pos.y > b.max.y + r || pos.z < b.min.z - r || pos.z > b.max.z + r) continue;
       const cx = Math.min(Math.max(pos.x, b.min.x), b.max.x);
       const cy = Math.min(Math.max(pos.y, b.min.y), b.max.y);
@@ -383,7 +546,7 @@ export class RoomModel {
     this.clearViz();
     const grid = gridTexture();
     for (const p of this.planes) {
-      const pad = p.kind === 'wall' ? 0.6 : p.kind === 'face' ? 0 : 0.3;
+      const pad = p.kind === 'wall' ? WALL_REACH : p.kind === 'face' ? 0 : 0.3;
       const w = p.uMax - p.uMin + pad * 2, h = p.vMax - p.vMin + pad * 2;
       const tex = grid.clone();
       tex.needsUpdate = true;
@@ -433,6 +596,7 @@ export class RoomModel {
   }
 }
 
+const EMPTY = [];
 function angDiff(a, b) {
   let d = Math.abs(a - b) % (2 * Math.PI);
   return d > Math.PI ? 2 * Math.PI - d : d;
