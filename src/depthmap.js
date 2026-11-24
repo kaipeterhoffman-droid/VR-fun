@@ -16,6 +16,8 @@ const SAMPLE_HZ = 8;
 const OCC = 2; // hits before a voxel counts as solid
 const MAX_H = 12;
 
+const VIEW_MAX = 12000; // voxels drawn at once (nearest the head)
+const VIEW_R = 4.5;
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const OFF = 512;
 const key = (x, y, z) => ((x + OFF) * 1024 + (y + OFF)) * 1024 + (z + OFF);
@@ -73,7 +75,7 @@ export class DepthMap {
     const geo = new THREE.BoxGeometry(VOX * 0.82, VOX * 0.82, VOX * 0.82);
     this.inst = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({
       color: 0x5ff2ff, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending,
-    }), 40000);
+    }), VIEW_MAX);
     this.inst.count = 0;
     this.inst.frustumCulled = false;
     this.inst.visible = false;
@@ -292,7 +294,9 @@ export class DepthMap {
         if ((i + j) % 2 === 0) this.carveFree(v);
       }
     }
-    if (this.inst.visible) this.rebuildView();
+    // redraw the scan view twice a second, not on every sample: in a big house this was the lag
+    const now = performance.now();
+    if (this.inst.visible && now - (this._viewAt || 0) > 500) { this._viewAt = now; this.rebuildView(); }
   }
 
   hit(p, n) {
@@ -337,6 +341,10 @@ export class DepthMap {
       lastKey = kk;
       this.free.set(kk, Math.min(255, (this.free.get(kk) || 0) + 1));
     }
+  }
+
+  freeCount(x, y, z) {
+    return this.free.get(key(Math.floor(x / COARSE), Math.floor(y / COARSE), Math.floor(z / COARSE))) || 0;
   }
 
   isSeenFree(x, y, z) {
@@ -416,9 +424,13 @@ export class DepthMap {
   rebuildView() {
     let i = 0;
     const m = this._m;
+    const cx = this.camPos.x / VOX, cy = this.camPos.y / VOX, cz = this.camPos.z / VOX;
+    const R2 = (VIEW_R / VOX) ** 2;
     for (const c of this.vox.values()) {
       if (c.h < OCC) continue;
-      if (i >= 40000) break;
+      const dx = c.x - cx, dy = c.y - cy, dz = c.z - cz;
+      if (dx * dx + dy * dy + dz * dz > R2) continue;
+      if (i >= VIEW_MAX) break;
       m.makeTranslation((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX);
       this.inst.setMatrixAt(i++, m);
     }

@@ -8,6 +8,7 @@ import { rebuildSurfaces, collideRoom, hasRoom, roomStats } from './collide.js';
 import { FX, Trail } from './fx.js';
 import { DepthMap } from './depthmap.js';
 import { RoomModel } from './roommodel.js';
+import { RoomStore } from './roomstore.js';
 import { initAudio, updateListener, sfxFire, sfxImpact, sfxRewind, sfxClick, sfxVanish } from './audio.js';
 
 export const ROOM = { killRadius: 14, killHeight: 7 };
@@ -68,7 +69,17 @@ const depthMap = new DepthMap(world.renderer, scene);
 const room = new RoomModel(scene);
 // scan phase: walk around while the depth map fills in, press A to bake it into walls + boxes
 let scanPreview = 0, scanPlanes = 0;
+const store = new RoomStore(world.renderer);
+let storeBegun = false;
+function resetRoom() {
+  depthMap.reset();
+  room.reset();
+  scanPreview = 0;
+  storeBegun = false;
+  store.status = 'idle';
+}
 function rescan() {
+  store.forget(); // the saved room was wrong or stale: start clean
   depthMap.reset();
   room.reset();
   scanPreview = 0;
@@ -79,9 +90,20 @@ function bakeRoom(now) {
   room.bake(depthMap, now);
   depthMap.setVisible(false, 0, now);
   window.dispatchEvent(new CustomEvent('room-baked', { detail: room.counts })); // other modes can start now
+  store.requestSave(room.serialize());
 }
-const scanning = () => depthMap.active && !room.baked;
-world.renderer.xr.addEventListener('sessionend', rescan);
+function loadSaved(time) {
+  const hit = store.poll(time);
+  if (!hit) return;
+  room.setFrame(hit.matrix);
+  room.load(hit.data, depthMap, time);
+  depthMap.setVisible(false, 0, time);
+  sfxClick(headPos, true);
+  cardDirty = true;
+  window.dispatchEvent(new CustomEvent('room-baked', { detail: room.counts }));
+}
+const scanning = () => depthMap.active && !room.baked && store.status !== 'looking';
+world.renderer.xr.addEventListener('sessionend', resetRoom);
 
 // ---------- gun ----------
 const gun = new THREE.Group();
@@ -180,10 +202,13 @@ function statusLine() {
   if (depthMap.mode === 'gpu' || depthMap.mode === 'cpu') {
     if (room.baked) {
       const c = room.counts;
-      return `room: ${c.wall} walls · ${c.boxes} boxes · stick-click view · hold Y rescan`;
+      const ceil = room.ceilY !== undefined ? `ceiling ${(room.ceilY - room.floorY).toFixed(1)} m` : 'no ceiling';
+      const saved = store.status === 'found' ? 'saved room' : store.status === 'saved' ? 'saved ✓' : store.status === 'saving' ? 'saving…' : `${c.wall} walls`;
+      return `${saved} · ${ceil} · ${c.boxes} boxes · hold Y rescan`;
     }
+    if (store.status === 'looking') return 'finding your saved room… (A = scan fresh)';
     return depthMap.active
-      ? `SCANNING · walk the room · ${Math.round(depthMap.solid / 100) / 10}k vox · ${scanPlanes} planes · A = done`
+      ? `SCANNING · ${Math.round(depthMap.solid / 100) / 10}k vox · ${room.counts.wall} walls · ${room.ceilY !== undefined ? 'ceiling ✓' : 'look up!'} · A = done`
       : 'SCANNING · look around the room';
   }
   if (depthMap.mode === 'waiting') return 'starting depth sensor…';
@@ -363,9 +388,12 @@ class WeirdPhysicsSystem extends createSystem({
     if (before === 'waiting' && (depthMap.mode === 'gpu' || depthMap.mode === 'cpu')) depthMap.setVisible(true, 8, time); // show the scan building
     depthMap.tick(time);
     room.tick(time);
+    if (!storeBegun && world.renderer.xr.isPresenting) { storeBegun = true; store.begin(time); }
+    store.tick();
+    if (store.status === 'looking' && !room.baked) loadSaved(time);
     if (scanning()) {
       if (!depthMap.show) depthMap.setVisible(true, 0, time); // keep the voxels up while scanning
-      if (time > scanPreview) { scanPreview = time + 1.5; scanPlanes = room.preview(depthMap); }
+      if (time > scanPreview) { scanPlanes = room.preview(depthMap); scanPreview = time + Math.max(2, room.previewMs * 0.04); }
     }
     const player = world.player;
     player.head.getWorldPosition(headPos);
@@ -386,8 +414,9 @@ class WeirdPhysicsSystem extends createSystem({
 
     const xr = world.input.xr;
     const pads = xr.gamepads;
-    const bakeNow = scanning() && pads.right?.getButtonDown('a-button');
-    if (bakeNow) { bakeRoom(time); pulse(gunSide, 0.8, 60); sfxClick(headPos, true); cardDirty = true; }
+    const bakeNow = depthMap.active && !room.baked && pads.right?.getButtonDown('a-button');
+    if (bakeNow && store.status === 'looking') { store.status = 'none'; sfxClick(headPos, false); cardDirty = true; }
+    else if (bakeNow) { bakeRoom(time); pulse(gunSide, 0.8, 60); sfxClick(headPos, true); cardDirty = true; }
     else if (pads.right?.getButtonDown('a-button') || pads.left?.getButtonDown('x-button')) { setMode(mode + 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, true); }
     if (pads.right?.getButtonDown('b-button')) { setMode(mode - 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, false); }
     if (pads.left?.getButtonDown('y-button')) { clearAll(); yHeld = time; }
@@ -405,7 +434,8 @@ class WeirdPhysicsSystem extends createSystem({
       else if (gp.getButtonPressed('xr-standard-trigger') && fireCooldown <= 0) { wantFire = true; fireCooldown = 0.15; }
     }
     if (xr.isPrimary('hand', 'left') && xr.getSelectState('left').start) {
-      if (scanning()) bakeRoom(time); else setMode(mode + 1);
+      if (depthMap.active && !room.baked) { if (store.status === 'looking') store.status = 'none'; else bakeRoom(time); }
+      else setMode(mode + 1);
       sfxClick(headPos, true);
     }
 
@@ -505,4 +535,4 @@ class WeirdPhysicsSystem extends createSystem({
 
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { world, bodies, depthMap, room, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
+window.__weird = { world, bodies, depthMap, room, store, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
