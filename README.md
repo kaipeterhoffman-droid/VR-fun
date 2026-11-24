@@ -4,7 +4,58 @@ WebXR toys for Quest 3, built on Meta's Immersive Web SDK.
 
 **Play:** https://kaipeterhoffman-droid.github.io/VR-fun/ (open in the Quest browser, press Enter AR)
 
-## Weird Physics gun (passthrough)
+## Trick Shot (two players, one headset)
+
+An obstacle-course game in your real room, in passthrough. Scan the room (walk around, press A), then from the menu start a match:
+
+1. **Tee and target.** Stand where shots will be taken and pull the trigger. Then aim where the target should float (right stick pushes it out or pulls it in) and pull again.
+2. **Opening build.** Each player starts with $100 and gets one build turn before anyone shoots.
+3. **Turns.** Take up to five shots at the target from the tee, then spend money on gadgets and leave them on the course. Hand the headset over. Four rounds. Each turn pays another $60.
+4. **Nothing is cleared.** Gadgets stay for the whole match, so the course gets worse every turn. You shoot through your own handiwork too.
+
+Scoring: a hit on shot 1 pays 500, then 400, 300, 200, 100. Every gadget the scoring shot touched on the way adds 50, every bonus hoop adds 100, and a bank off the real room adds 50. Points win; unspent cash only breaks ties.
+
+Controls (controllers required):
+
+| | Build | Shoot |
+| --- | --- | --- |
+| Right trigger | place the gadget | fire (only from the tee) |
+| A / B, or left stick | browse the shop | change the law the gun fires |
+| Right stick | push / pull, turn the gadget | |
+| Y | undo your last placement, full refund | call off a shot in flight |
+| Left trigger | menu | menu |
+
+The shop is a tablet on your left controller. A gadget is held on the end of the gun's ray and takes its orientation from your wrist, so hold it close for fine control or push it out to place across the room.
+
+| Gadget | $ | What it does |
+| --- | --- | --- |
+| Glass | 10 | Stops one shot, then shatters |
+| Wall | 15 | 80 x 60 cm slab, opaque |
+| Fog | 15 | A cloud you cannot see through |
+| Mine | 15 | Blasts nearby shots away, re-arms in 3 s |
+| Spring | 20 | Launches whatever lands on it along the pad |
+| Fan | 20 | A 2 m jet that bends arcs |
+| Bonus hoop | 20 | +100 for a scoring shot that went through it |
+| Booster | 25 | Ring that fires shots straight down its axis |
+| Gravity orb / Antigravity | 25 | Pulls / pushes |
+| Demolition | 25 | Deletes any one gadget, yours or theirs |
+| Piston | 30 | Block slamming back and forth |
+| Spin plank | 30 | 1.1 m propeller |
+| Pendulum | 30 | Heavy bob on an 80 cm arm |
+| Orbiter | 30 | Ball circling a 40 cm ring |
+| Time bubble | 30 | Quarter-speed time inside |
+| Laser | 35 | Vaporises shots; blinks 1.6 s on, 1 s off |
+| Black hole | 45 | Strong pull, and the horizon eats shots |
+| Antimatter gun | 50 | Turret that tracks shots and annihilates them |
+| Portal pair | 90 | In the orange end, out the blue |
+
+A new gadget is one entry in `src/game/items.js` (look, plus any of `collide`, `field`, `timeScale`, `post`, `update`). The match flow is `src/game/game.js`, the panels `src/game/ui.js`.
+
+Smoothness notes: depth sampling (a GPU readback plus a few ms of CPU) runs at full rate only while scanning, and stops during a match or while anything is in flight; every material is drawn once at session start so shaders don't compile mid-game; additive glows leave framebuffer alpha alone so they don't punch dark holes in passthrough (`src/blend.js`).
+
+## Weird Physics gun (the sandbox)
+
+Menu > B. The same gun, no rules.
 
 You stand in your real room holding a blaster that fires objects, each obeying a different broken law. Shots pass through each other but hit your real room. Every law bounces in its own way.
 

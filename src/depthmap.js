@@ -55,6 +55,7 @@ export class DepthMap {
     this.bounds = new THREE.Box3();
     this.solid = 0;
     this.mode = 'waiting'; // waiting | gpu | cpu | unavailable
+    this.rate = SAMPLE_HZ; // samples per second; 0 pauses (each sample is a GPU readback plus a few ms of CPU)
     this.lastSample = -1;
     this.pixels = new Uint8Array(N * N * 4);
     this.depth = new Float32Array(N * N);
@@ -183,7 +184,7 @@ export class DepthMap {
 
   // ---------- map update ----------
   update(time) {
-    if (this.mode === 'unavailable') return;
+    if (this.mode === 'unavailable' || !this.rate) return;
     const xr = this.renderer.xr;
     const frame = xr.getFrame?.();
     const ref = xr.getReferenceSpace?.();
@@ -208,7 +209,7 @@ export class DepthMap {
     }
     this._prevPose = { time, x: o.x, y: o.y, z: o.z, w: o.w, px: pp.x, py: pp.y, pz: pp.z };
     if (time < (this.settleUntil || 0)) return;
-    if (time - this.lastSample < 1 / SAMPLE_HZ) return;
+    if (time - this.lastSample < 1 / this.rate) return;
     this.lastSample = time;
     try {
       if (session.depthUsage === 'gpu-optimized') {

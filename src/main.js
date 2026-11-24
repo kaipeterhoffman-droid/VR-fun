@@ -9,6 +9,8 @@ import { FX, Trail } from './fx.js';
 import { DepthMap } from './depthmap.js';
 import { RoomModel } from './roommodel.js';
 import { RoomStore } from './roomstore.js';
+import { createGame } from './game/game.js';
+import { fixAdditive } from './blend.js';
 import { initAudio, updateListener, sfxFire, sfxImpact, sfxRewind, sfxClick, sfxVanish } from './audio.js';
 
 export const ROOM = { killRadius: 14, killHeight: 7 };
@@ -198,6 +200,8 @@ function setMode(i) {
   cardPulse = 1;
 }
 function statusLine() {
+  const gs = game.status();
+  if (gs) return gs;
   if (!world.renderer.xr.isPresenting) return 'trigger fire · A/B cycle · Y clear · stick-click: show room map';
   if (depthMap.mode === 'gpu' || depthMap.mode === 'cpu') {
     if (room.baked) {
@@ -315,10 +319,12 @@ function contact(b, n, pen, ctx) {
   }
 }
 
+let cbBody = null, cbCtx = null;
+const cb = (n, pen) => contact(cbBody, n, pen, cbCtx); // one callback for every contact, instead of a closure per shot per substep
 function collide(b, ctx) {
   b.onFloor = false;
   b.onCeiling = false;
-  const cb = (n, pen) => contact(b, n, pen, ctx);
+  cbBody = b; cbCtx = ctx;
   // our live depth map wins; the headset's scan is the fallback
   const mapped = depthMap.active;
   if (room.baked) {
@@ -329,6 +335,7 @@ function collide(b, ctx) {
     depthMap.collide(b.pos, b.r, cb); // furniture, clutter, people: anything the sensor has seen
     collideRoom(b.pos, b.r, cb, true); // plus the room's own walls/floor/ceiling, so nothing leaks out of unseen corners
   } else collideRoom(b.pos, b.r, cb);
+  game.collide(b, cb); // gadgets on the course
   // safety net: the tracking floor, in case the map has holes
   if (b.state === 'free' && b.pos.y < b.r && ((!mapped && !hasRoom()) || b.pos.y < b.r - 0.03)) contact(b, UP, b.r - b.pos.y, ctx);
 }
@@ -340,6 +347,7 @@ function fieldsOn(b, out, ctx) {
     if (o === b || !o.law.field) continue;
     o.law.field(o, b, ctx, out);
   }
+  game.fields(b, out); // gravity orbs, fans, black holes
   return out;
 }
 
@@ -372,6 +380,31 @@ function toggleRoomView() {
   if (sys) sys.config.showWireFrame.value = !sys.config.showWireFrame.value;
 }
 
+// shared by every law, every frame: nothing here is allocated in the loop
+const ctx = {
+  dt: 0, time: 0, headPos, headFwd, handPos, handOk, bodies, THREE, ROOM, scene,
+  tmpA: new THREE.Vector3(), tmpB: new THREE.Vector3(), tmpC: new THREE.Vector3(), xAxis: new THREE.Vector3(1, 0, 0),
+  fieldsOn: (b, out) => fieldsOn(b, out, ctx),
+};
+const sctx = { ...ctx }; // same, with dt = one substep
+
+// The first time a material is drawn the GPU compiles its shader, which is a visible hitch.
+// So on entering AR, draw one of everything, microscopic, for a few frames.
+let warm = null, warmFrames = 0;
+function warmUp() {
+  if (warm) scene.remove(warm);
+  warm = new THREE.Group();
+  for (const law of LAWS) warm.add(law.make(THREE).root);
+  game.warm(warm);
+  fixAdditive(warm);
+  warm.traverse((o) => { o.frustumCulled = false; });
+  warm.scale.setScalar(0.001);
+  warm.position.set(0, 1, -1);
+  scene.add(warm);
+  warmFrames = 5;
+}
+world.renderer.xr.addEventListener('sessionstart', warmUp);
+
 let fireCooldown = 0;
 let yHeld = 0;
 const lastReplayDir = new Map();
@@ -381,6 +414,10 @@ class WeirdPhysicsSystem extends createSystem({
 }) {
   update(delta, time) {
     const dt = Math.min(delta, 1 / 30);
+    if (warm && --warmFrames <= 0) { scene.remove(warm); warm = null; }
+    // depth sampling costs a GPU readback and several ms: full rate while scanning, a trickle once the
+    // room is baked, and none at all during a match or while anything is in flight
+    depthMap.rate = !room.baked ? 8 : game.busy() || bodies.length ? 0 : 2;
     rebuildSurfaces(this.queries.planes.entities, this.queries.meshes.entities);
     viewTime = time;
     const before = depthMap.mode;
@@ -414,12 +451,15 @@ class WeirdPhysicsSystem extends createSystem({
 
     const xr = world.input.xr;
     const pads = xr.gamepads;
+    const roomReady = room.baked || depthMap.mode === 'unavailable';
+    const flags = game.frame(dt, time, { headPos, headFwd, raySpace, ready: roomReady, presenting: world.renderer.xr.isPresenting });
     const bakeNow = depthMap.active && !room.baked && pads.right?.getButtonDown('a-button');
     if (bakeNow && store.status === 'looking') { store.status = 'none'; sfxClick(headPos, false); cardDirty = true; }
     else if (bakeNow) { bakeRoom(time); pulse(gunSide, 0.8, 60); sfxClick(headPos, true); cardDirty = true; }
+    else if (!flags.cycle) { /* the game owns A/B right now */ }
     else if (pads.right?.getButtonDown('a-button') || pads.left?.getButtonDown('x-button')) { setMode(mode + 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, true); }
-    if (pads.right?.getButtonDown('b-button')) { setMode(mode - 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, false); }
-    if (pads.left?.getButtonDown('y-button')) { clearAll(); yHeld = time; }
+    if (flags.cycle && pads.right?.getButtonDown('b-button')) { setMode(mode - 1); pulse(gunSide, 0.2, 20); sfxClick(headPos, false); }
+    if (pads.left?.getButtonDown('y-button')) { if (flags.clear) clearAll(); yHeld = time; }
     if (yHeld && !pads.left?.getButtonPressed('y-button')) yHeld = 0;
     if (yHeld && time - yHeld > 1 && room.baked) { yHeld = 0; rescan(); pulse('left', 0.8, 80); sfxRewind(headPos); }
     if (pads.left?.getButtonDown('xr-standard-thumbstick') || pads.right?.getButtonDown('xr-standard-thumbstick')) toggleRoomView();
@@ -439,10 +479,10 @@ class WeirdPhysicsSystem extends createSystem({
       sfxClick(headPos, true);
     }
 
-    if (wantFire) {
+    if (wantFire && flags.fire) {
       muzzle.getWorldPosition(muzzlePos);
       raySpace.getWorldDirection(muzzleDir).negate();
-      fire(muzzlePos, muzzleDir);
+      game.onFire(fire(muzzlePos, muzzleDir));
       fx.burst(muzzlePos, LAWS[mode].color, { count: 14, speed: 1.4, normal: muzzleDir, spread: 0.35, life: 0.25, gravity: 0, drag: 6 });
       fx.ripple(muzzlePos, muzzleDir, LAWS[mode].color, 0.09, 0.18);
       sfxFire(LAWS[mode].key, muzzlePos);
@@ -461,26 +501,23 @@ class WeirdPhysicsSystem extends createSystem({
     chamber.rotation.y += dt * 2;
     chamberHalo.scale.setScalar(1 + Math.sin(time * 5) * 0.12 + cardPulse * 0.6);
 
-    const ctx = {
-      dt, time, headPos, headFwd, handPos, handOk, bodies, THREE, ROOM, scene,
-      tmpA: new THREE.Vector3(), tmpB: new THREE.Vector3(), tmpC: new THREE.Vector3(), xAxis: new THREE.Vector3(1, 0, 0),
-      fieldsOn: (b, out) => fieldsOn(b, out, ctx),
-    };
+    ctx.dt = dt; ctx.time = time; sctx.time = time;
 
     // 4 substeps: at 9 m/s and 72 fps a shot moves ~3 cm per substep, less than its radius,
     // so it can't tunnel through a wall
     const SUB = 4;
     const h = dt / SUB;
-    const sctx = { ...ctx, dt: h };
     for (let s = 0; s < SUB; s++) {
       for (const b of bodies) {
+        const hb = h * game.timeScale(b); // time bubbles slow a shot's own clock
+        sctx.dt = hb;
         if (b.state === 'free') {
           if (b.law.step) b.law.step(b, sctx);
           else {
             const a = fieldsOn(b, b.law.accel(b, sctx, tmpAcc.set(0, 0, 0)), sctx);
-            b.vel.addScaledVector(a, h);
-            b.vel.multiplyScalar(1 - (b.law.drag ?? 0.02) * h);
-            b.pos.addScaledVector(b.vel, h);
+            b.vel.addScaledVector(a, hb);
+            b.vel.multiplyScalar(1 - (b.law.drag ?? 0.02) * hb);
+            b.pos.addScaledVector(b.vel, hb);
           }
           if (!b.law.kinematicNow?.(b)) {
             collide(b, sctx);
@@ -494,6 +531,7 @@ class WeirdPhysicsSystem extends createSystem({
         } else if (b.law.stepState) {
           b.law.stepState(b, sctx);
         }
+        game.postStep(b);
       }
     }
 
@@ -517,7 +555,7 @@ class WeirdPhysicsSystem extends createSystem({
       }
       const far = Math.hypot(b.pos.x - headPos.x, b.pos.z - headPos.z) > ROOM.killRadius || b.pos.y > ROOM.killHeight || b.pos.y < -3;
       const life = Math.min((b.law.lifetime ?? MAX_AGE) - b.age, (b.law.patience ?? 8) - b.idle);
-      if (far || life <= 0 || !Number.isFinite(b.pos.x + b.pos.y + b.pos.z)) { lastReplayDir.delete(b); removeBody(b, far); continue; }
+      if (far || life <= 0 || b.kill || !Number.isFinite(b.pos.x + b.pos.y + b.pos.z)) { lastReplayDir.delete(b); removeBody(b, far || b.kill); continue; }
       // pop in, shrink out
       b.obj.scale.setScalar(Math.min(1, 0.3 + b.age * 8, Math.max(0.05, life)));
       b.obj.position.copy(b.pos);
@@ -533,6 +571,9 @@ class WeirdPhysicsSystem extends createSystem({
   }
 }
 
+fixAdditive(scene);
+fixAdditive(gun);
+const game = createGame({ world, scene, fx, bodies, clearAll, pulse });
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { world, bodies, depthMap, room, store, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
+window.__weird = { game, fx, world, bodies, depthMap, room, store, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };

@@ -161,3 +161,44 @@ export function sfxVanish(pos) {
   const d = spatial(pos);
   tone(d, { type: 'sine', f0: 700, f1: 1600, dur: 0.12, vol: 0.05 });
 }
+
+// Game sounds: one switch, same synth. kind picks the recipe.
+export function sfxGame(kind, pos) {
+  if (!ctx) return;
+  const d = spatial(pos);
+  switch (kind) {
+    case 'tick': tone(d, { type: 'square', f0: 1100, f1: 1100, dur: 0.025, vol: 0.05 }); break;
+    case 'place':
+      tone(d, { type: 'sine', f0: 300, f1: 620, dur: 0.12, vol: 0.3 });
+      noise(d, { dur: 0.06, vol: 0.15, freq: 1500, q: 0.8 });
+      break;
+    case 'undo': tone(d, { type: 'sine', f0: 620, f1: 280, dur: 0.14, vol: 0.25 }); break;
+    case 'deny':
+      tone(d, { type: 'sawtooth', f0: 160, f1: 150, dur: 0.09, vol: 0.14 });
+      tone(d, { type: 'sawtooth', f0: 130, f1: 120, dur: 0.12, vol: 0.14, delay: 0.1 });
+      break;
+    case 'done': [392, 523, 659].forEach((f, i) => tone(d, { type: 'triangle', f0: f, dur: 0.14, vol: 0.2, delay: i * 0.07 })); break;
+    case 'boing':
+      tone(d, { type: 'sine', f0: 180, f1: 720, dur: 0.22, vol: 0.4 });
+      tone(d, { type: 'triangle', f0: 360, f1: 1440, dur: 0.18, vol: 0.12 });
+      break;
+    case 'boost': tone(d, { type: 'sawtooth', f0: 200, f1: 1800, dur: 0.2, vol: 0.14 }); noise(d, { dur: 0.2, vol: 0.15, freq: 4000, q: 0.5 }); break;
+    case 'hoop': [784, 988, 1319].forEach((f, i) => tone(d, { type: 'sine', f0: f, dur: 0.22, vol: 0.2, delay: i * 0.05 })); break;
+    case 'portal': tone(d, { type: 'sine', f0: 900, f1: 200, dur: 0.16, vol: 0.25 }); tone(d, { type: 'sine', f0: 200, f1: 900, dur: 0.16, vol: 0.2, delay: 0.08 }); break;
+    case 'zap': noise(d, { dur: 0.22, vol: 0.4, freq: 5200, q: 3 }); tone(d, { type: 'sawtooth', f0: 1800, f1: 90, dur: 0.22, vol: 0.2 }); break;
+    case 'gulp': tone(d, { type: 'sine', f0: 320, f1: 30, dur: 0.5, vol: 0.5 }); break;
+    case 'pew': tone(d, { type: 'square', f0: 1500, f1: 300, dur: 0.09, vol: 0.1 }); break;
+    case 'annihilate':
+      noise(d, { dur: 0.35, vol: 0.5, freq: 900, q: 0.4, type: 'lowpass' });
+      tone(d, { type: 'sine', f0: 2400, f1: 60, dur: 0.3, vol: 0.3 });
+      break;
+    case 'boom':
+      noise(d, { dur: 0.4, vol: 0.6, freq: 500, q: 0.5, type: 'lowpass' });
+      tone(d, { type: 'sine', f0: 140, f1: 35, dur: 0.4, vol: 0.5 });
+      break;
+    case 'glass': [3100, 4300, 5700, 7100].forEach((f, i) => tone(d, { type: 'sine', f0: f, f1: f * 0.9, dur: 0.18, vol: 0.09, delay: i * 0.02 })); noise(d, { dur: 0.12, vol: 0.3, freq: 6500, q: 1.5 }); break;
+    case 'miss': tone(d, { type: 'triangle', f0: 330, f1: 196, dur: 0.25, vol: 0.2 }); break;
+    case 'score': [523, 659, 784, 1047, 1319].forEach((f, i) => { tone(d, { type: 'triangle', f0: f, dur: 0.3, vol: 0.25, delay: i * 0.08 }); tone(d, { type: 'sine', f0: f * 2, dur: 0.25, vol: 0.08, delay: i * 0.08 }); }); break;
+    case 'win': [392, 523, 659, 784, 659, 784, 1047].forEach((f, i) => tone(d, { type: 'triangle', f0: f, dur: 0.34, vol: 0.25, delay: i * 0.13 })); break;
+  }
+}
