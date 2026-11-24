@@ -79,7 +79,7 @@ You stand in your real room holding a blaster that fires objects, each obeying a
 - furniture voxels become boxes via a 12 cm height map; things with a gap underneath (tables, shelves, lamps) float, so shots can roll under them
 - flicker, flying pixels at silhouettes and samples taken during fast head turns are rejected; anything left over that the model doesn't explain still collides as raw voxels
 
-The baked room is saved, pinned to a persistent anchor, so next time it snaps back into place on its own (press A while it's looking to scan fresh). Hold Y for a second to throw it away and rescan. If depth sensing is unavailable it falls back to Quest's room scan.
+The baked room is saved, pinned to a persistent anchor, so next time it snaps back into place on its own (press A while it's looking to scan fresh). Hold Y for a second to throw it away and rescan. Outside AR, a **Download room scan** button saves the stored scan as a JSON file (voxels, planes, boxes) for inspection. If depth sensing is unavailable it falls back to Quest's room scan.
 
 Controls: trigger fires (hold for auto), A / X next law (A bakes the scan while scanning), B previous, Y clears (hold to rescan), thumbstick click shows the room model. Bare hands: right pinch fires, left pinch cycles. The card above the gun shows the loaded law and whether a room scan was found.
 
