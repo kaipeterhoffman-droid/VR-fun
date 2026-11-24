@@ -412,7 +412,7 @@ export class RoomModel {
     // flicker: weakly-seen voxels in space the sensor has also looked straight through
     let pruned = 0;
     for (const [k, c] of map.vox) {
-      if (c.h < 4 && map.isSeenFree((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX)) { if (c.h >= OCC) map.solid--; map.vox.delete(k); pruned++; }
+      if (c.h < 4 && map.isSeenFree((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX)) { map.removeVoxel(k, c); pruned++; }
     }
     this.pruned = pruned;
     this.promoteCoarse(map);
@@ -471,7 +471,25 @@ export class RoomModel {
       planes: this.planes.map((p) => ({ n: p.n.toArray(), d: p.d, kind: p.kind, u: p.u.toArray(), v: p.v.toArray(), uMin: p.uMin, uMax: p.uMax, vMin: p.vMin, vMax: p.vMax })),
       boxes: this.boxes.map((b) => [...b.min.toArray(), ...b.max.toArray(), b.floats ? 1 : 0]),
       freeKeys: keys, freeCounts: counts,
+      ...this.voxelDump(),
     };
+  }
+
+  // raw voxels too, so a scan can be exported and inspected by hand
+  voxelDump() {
+    const src = this.map?.vox;
+    if (!src) return this.savedVox || {};
+    const n = [...src.values()].filter((c) => c.h >= OCC).length;
+    const vKeys = new Int32Array(n), vH = new Uint8Array(n), vN = new Int8Array(n * 3);
+    let i = 0;
+    for (const [k, c] of src) {
+      if (c.h < OCC) continue;
+      const L = Math.hypot(c.nx, c.ny, c.nz) || 1;
+      vKeys[i] = k; vH[i] = c.h;
+      vN[i * 3] = Math.round((c.nx / L) * 127); vN[i * 3 + 1] = Math.round((c.ny / L) * 127); vN[i * 3 + 2] = Math.round((c.nz / L) * 127);
+      i++;
+    }
+    return { vKeys, vH, vN };
   }
 
   load(data, map, now) {
@@ -485,6 +503,7 @@ export class RoomModel {
       return b;
     });
     this.indexBoxes();
+    this.savedVox = data.vKeys ? { vKeys: data.vKeys, vH: data.vH, vN: data.vN } : null;
     const free = new Map();
     for (let i = 0; i < data.freeKeys.length; i++) free.set(data.freeKeys[i], data.freeCounts[i]);
     this.map = {

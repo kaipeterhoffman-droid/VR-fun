@@ -21,6 +21,8 @@ const VIEW_R = 4.5;
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 const OFF = 512;
 const key = (x, y, z) => ((x + OFF) * 1024 + (y + OFF)) * 1024 + (z + OFF);
+const CH = 16; // voxels per chunk side
+const chunkKey = (x, y, z) => ((Math.floor(x / CH) + 64) * 128 + (Math.floor(y / CH) + 64)) * 128 + (Math.floor(z / CH) + 64);
 
 const VS = `#version 300 es
 in vec2 aPos; out vec2 vUv;
@@ -50,6 +52,7 @@ export class DepthMap {
     this.scene = scene;
     this.vox = new Map(); // key -> { h, nx, ny, nz, x, y, z, explained }
     this.coarse = new Map(); // key -> { w, sx, sy, sz, nx, ny, nz }  (12 cm cells, out to 8 m)
+    this.chunks = new Map(); // ~1 m chunk -> Set of voxel keys (so the view only walks what's near you)
     this.free = new Map(); // key -> times a sensor ray passed through this 12 cm cell
     this.explain = null; // (worldX, worldY, worldZ) => true when a baked plane/box already covers it
     this.bounds = new THREE.Box3();
@@ -90,6 +93,9 @@ export class DepthMap {
 
   reset() {
     this.vox.clear();
+    this.chunks.clear();
+    this.pending = null;
+    this.busy = false;
     this.coarse.clear();
     this.free.clear();
     this.bounds.makeEmpty();
@@ -136,7 +142,7 @@ export class DepthMap {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  readGPU(info) {
+  readGPU(info, view) {
     const gl = this.renderer.getContext();
     this.initGL(gl);
     const isArray = info.textureType === 'texture-array';
@@ -161,14 +167,25 @@ export class DepthMap {
     gl.uniformMatrix4fv(prog.u.uXf, false, IDENTITY);
     gl.bindVertexArray(this.vao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
+    const P = { proj: Float32Array.from(view.projectionMatrix), cam: Float32Array.from(view.transform.matrix), at: performance.now(), sync: null };
+    if (gl.fenceSync) {
+      if (!this.pbo) {
+        this.pbo = gl.createBuffer();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.pbo);
+        gl.bufferData(gl.PIXEL_PACK_BUFFER, N * N * 4, gl.STREAM_READ);
+      }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.pbo);
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      P.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+    } else {
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
+    }
     gl.bindVertexArray(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this.renderer.resetState(); // hand GL back to three.js untouched
-    const px = this.pixels;
-    for (let i = 0; i < N * N; i++) {
-      this.depth[i] = px[i * 4 + 2] > 0 ? (px[i * 4] * 256 + px[i * 4 + 1]) / 1000 : 0;
-    }
+    this.pending = P;
   }
 
   readCPU(info) {
@@ -208,6 +225,9 @@ export class DepthMap {
       if (ang > 1.6 || lin > 1.2) this.settleUntil = time + 0.2;
     }
     this._prevPose = { time, x: o.x, y: o.y, z: o.z, w: o.w, px: pp.x, py: pp.y, pz: pp.z };
+    // finish work already in flight before taking a new sample
+    if (this.busy) { this.integrateSome(2.5); return; }
+    if (this.pending) { this.collect(); return; }
     if (time < (this.settleUntil || 0)) return;
     if (time - this.lastSample < 1 / this.rate) return;
     this.lastSample = time;
@@ -215,20 +235,48 @@ export class DepthMap {
       if (session.depthUsage === 'gpu-optimized') {
         const info = xr.getBinding().getDepthInformation(view);
         if (!info || !info.texture) return this.fail();
-        this.readGPU(info);
+        this.readGPU(info, view);
         this.mode = 'gpu';
       } else {
         const info = frame.getDepthInformation(view);
         if (!info) return this.fail();
         this.readCPU(info);
         this.mode = 'cpu';
+        this.beginIntegrate(view.projectionMatrix, view.transform.matrix);
+        this.integrateSome(2.5);
       }
     } catch (e) {
+      this.pending = null;
       this.renderer.resetState();
       return this.fail(e);
     }
     this.failures = 0;
-    this.integrate(view);
+  }
+
+  // async readback: the GPU fills a pixel buffer; we pick it up a frame or two later instead of
+  // stalling the whole pipeline with a synchronous readPixels
+  collect() {
+    const gl = this.gl, P = this.pending;
+    if (P.sync) {
+      const st = gl.clientWaitSync(P.sync, 0, 0);
+      if (st === gl.TIMEOUT_EXPIRED && performance.now() - P.at < 500) return;
+      gl.deleteSync(P.sync);
+      if (st === gl.WAIT_FAILED || st === gl.TIMEOUT_EXPIRED) { this.pending = null; return; }
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.pbo);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, this.pixels);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    }
+    this.pending = null;
+    this.decode();
+    this.beginIntegrate(P.proj, P.cam);
+    this.integrateSome(2.5);
+  }
+
+  decode() {
+    const px = this.pixels;
+    for (let i = 0; i < N * N; i++) {
+      this.depth[i] = px[i * 4 + 2] > 0 ? (px[i * 4] * 256 + px[i * 4 + 1]) / 1000 : 0;
+    }
   }
 
   fail(e) {
@@ -236,9 +284,10 @@ export class DepthMap {
     if (e && this.failures === 1) console.warn('[depthmap]', e);
   }
 
-  integrate(view) {
-    this.invProj.fromArray(view.projectionMatrix).invert();
-    this.camM.fromArray(view.transform.matrix);
+  // start integrating the current depth image (projection + camera matrix as of capture time)
+  beginIntegrate(proj, camMatrix) {
+    this.invProj.fromArray(proj).invert();
+    this.camM.fromArray(camMatrix);
     this.camPos.setFromMatrixPosition(this.camM);
     const { depth, pts } = this;
     const v = this._v;
@@ -253,8 +302,21 @@ export class DepthMap {
         pts[k * 3] = v.x; pts[k * 3 + 1] = v.y; pts[k * 3 + 2] = v.z;
       }
     }
+    this.row = 0;
+    this.parity = ((this.parity || 0) + 1) & 3;
+    this.busy = true;
+  }
+
+  // a few rows per frame, so a sample never costs a whole frame (Quest's CPU is ~4x slower than a desktop)
+  integrateSome(budgetMs) {
+    const t0 = performance.now();
+    const { depth, pts } = this;
+    const v = this._v;
     const a = this._a, b = this._b, n = this._n, dir = this._dir;
-    for (let j = 0; j < N - 1; j++) {
+    const par = this.parity;
+    for (; this.row < N - 1; this.row++) {
+      if (performance.now() - t0 > budgetMs) return false;
+      const j = this.row;
       for (let i = 0; i < N - 1; i++) {
         const k = j * N + i;
         if (Number.isNaN(pts[k * 3])) continue;
@@ -283,21 +345,23 @@ export class DepthMap {
         const edge = (i > 0 && Math.abs(depth[k - 1] - dk) > tol) || Math.abs(depth[k + 1] - dk) > tol ||
           (j > 0 && Math.abs(depth[k - N] - dk) > tol) || Math.abs(depth[k + N] - dk) > tol;
         if (edge) {
-          if ((i + j) % 2 === 0) this.carveFree(v, 0.15);
+          if (((i + 2 * j + par) & 3) === 0) this.carveFree(v, 0.15);
           continue;
         }
         if (dk <= NEAR) {
           this.hit(v, haveN ? n : null);
-          if ((i + j * 3) % 3 === 0) this.carve(v, dk);
+          if (((i + 2 * j + par) & 3) === 1) this.carve(v, dk);
         } else if (haveN) {
           this.hitCoarse(v, n);
         }
-        if ((i + j) % 2 === 0) this.carveFree(v);
+        if (((i + 2 * j + par) & 3) === 0) this.carveFree(v);
       }
     }
+    this.busy = false;
     // redraw the scan view twice a second, not on every sample: in a big house this was the lag
     const now = performance.now();
     if (this.inst.visible && now - (this._viewAt || 0) > 500) { this._viewAt = now; this.rebuildView(); }
+    return true;
   }
 
   hit(p, n) {
@@ -308,6 +372,10 @@ export class DepthMap {
       c = { h: 0, nx: 0, ny: 0, nz: 0, x, y, z, explained: false };
       if (this.explain) c.explained = this.explain((x + 0.5) * VOX, (y + 0.5) * VOX, (z + 0.5) * VOX);
       this.vox.set(kk, c);
+      const ck = chunkKey(x, y, z);
+      let set = this.chunks.get(ck);
+      if (!set) this.chunks.set(ck, (set = new Set()));
+      set.add(kk);
     }
     const was = c.h >= OCC;
     c.h = Math.min(MAX_H, c.h + 1);
@@ -372,12 +440,18 @@ export class DepthMap {
       const was = c.h >= OCC;
       c.h -= 1;
       if (was && c.h < OCC) this.solid--;
-      if (c.h <= 0) this.vox.delete(kk);
+      if (c.h <= 0) this.removeVoxel(kk, c);
     }
   }
 
   // ---------- collision ----------
   // contact(normal, penetration) for the surface nearest the sphere, using the stored normals
+  removeVoxel(kk, c) {
+    if (c.h >= OCC) this.solid--;
+    this.vox.delete(kk);
+    this.chunks.get(chunkKey(c.x, c.y, c.z))?.delete(kk);
+  }
+
   collide(pos, r, contact) {
     const reach = r + VOX * 0.5;
     const x0 = Math.floor((pos.x - reach) / VOX), x1 = Math.floor((pos.x + reach) / VOX);
@@ -427,13 +501,20 @@ export class DepthMap {
     const m = this._m;
     const cx = this.camPos.x / VOX, cy = this.camPos.y / VOX, cz = this.camPos.z / VOX;
     const R2 = (VIEW_R / VOX) ** 2;
-    for (const c of this.vox.values()) {
-      if (c.h < OCC) continue;
-      const dx = c.x - cx, dy = c.y - cy, dz = c.z - cz;
-      if (dx * dx + dy * dy + dz * dz > R2) continue;
-      if (i >= VIEW_MAX) break;
-      m.makeTranslation((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX);
-      this.inst.setMatrixAt(i++, m);
+    const cr = Math.ceil(VIEW_R / VOX / CH);
+    const gx = Math.floor(cx / CH), gy = Math.floor(cy / CH), gz = Math.floor(cz / CH);
+    outer: for (let ax = -cr; ax <= cr; ax++) for (let ay = -cr; ay <= cr; ay++) for (let az = -cr; az <= cr; az++) {
+      const set = this.chunks.get(((gx + ax + 64) * 128 + (gy + ay + 64)) * 128 + (gz + az + 64));
+      if (!set) continue;
+      for (const kk of set) {
+        const c = this.vox.get(kk);
+        if (!c || c.h < OCC) continue;
+        const dx = c.x - cx, dy = c.y - cy, dz = c.z - cz;
+        if (dx * dx + dy * dy + dz * dz > R2) continue;
+        if (i >= VIEW_MAX) break outer;
+        m.makeTranslation((c.x + 0.5) * VOX, (c.y + 0.5) * VOX, (c.z + 0.5) * VOX);
+        this.inst.setMatrixAt(i++, m);
+      }
     }
     this.inst.count = i;
     this.inst.instanceMatrix.needsUpdate = true;

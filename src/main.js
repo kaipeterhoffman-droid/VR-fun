@@ -8,7 +8,7 @@ import { rebuildSurfaces, collideRoom, hasRoom, roomStats } from './collide.js';
 import { FX, Trail } from './fx.js';
 import { DepthMap } from './depthmap.js';
 import { RoomModel } from './roommodel.js';
-import { RoomStore } from './roomstore.js';
+import { RoomStore, exportSaved, hasSaved } from './roomstore.js';
 import { createGame } from './game/game.js';
 import { fixAdditive } from './blend.js';
 import { initAudio, updateListener, sfxFire, sfxImpact, sfxRewind, sfxClick, sfxVanish } from './audio.js';
@@ -72,6 +72,22 @@ const room = new RoomModel(scene);
 // scan phase: walk around while the depth map fills in, press A to bake it into walls + boxes
 let scanPreview = 0, scanPlanes = 0;
 const store = new RoomStore(world.renderer);
+// 2D page: let the saved scan be downloaded (to send it in for a look)
+const exportBtn = document.getElementById('export');
+async function refreshExport() { if (exportBtn) exportBtn.hidden = !(await hasSaved()); }
+refreshExport();
+world.renderer.xr.addEventListener('sessionend', () => setTimeout(refreshExport, 500));
+exportBtn?.addEventListener('click', async () => {
+  const blob = await exportSaved();
+  if (!blob) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `room-scan-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
 let storeBegun = false;
 function resetRoom() {
   depthMap.reset();
@@ -561,9 +577,10 @@ class WeirdPhysicsSystem extends createSystem({
       b.obj.position.copy(b.pos);
       b.law.visual?.(b, ctx);
       b.trail.push(b.pos, Math.min(1, b.vel.length() / 3));
-      const hgt = Math.max(0, b.pos.y - b.r);
+      const floorY = room.baked ? room.floorY : 0;
+      const hgt = Math.max(0, b.pos.y - b.r - floorY);
       const sc = b.r * 2.6 * (1 + hgt * 0.35);
-      b.shadow.position.set(b.pos.x, 0.003, b.pos.z);
+      b.shadow.position.set(b.pos.x, floorY + 0.003, b.pos.z);
       b.shadow.scale.set(sc, sc, sc);
       b.shadow.material.opacity = Math.max(0.05, 0.8 - hgt * 0.35);
     }
@@ -576,4 +593,4 @@ fixAdditive(gun);
 const game = createGame({ world, scene, fx, bodies, clearAll, pulse });
 setMode(0);
 world.registerSystem(WeirdPhysicsSystem);
-window.__weird = { game, fx, world, bodies, depthMap, room, store, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };
+window.__weird = { game, fx, world, bodies, depthMap, room, store, exportSaved, bakeRoom, rescan, fire, setMode, clearAll, roomStats, accentMats, get mode() { return mode; } };

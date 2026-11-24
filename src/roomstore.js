@@ -31,6 +31,26 @@ async function get() {
   });
 }
 
+// the saved scan as a downloadable JSON file (typed arrays as base64)
+export async function exportSaved() {
+  const rec = await get();
+  if (!rec) return null;
+  const b64 = (ta) => {
+    const u8 = new Uint8Array(ta.buffer, ta.byteOffset, ta.byteLength);
+    let s = '';
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return btoa(s);
+  };
+  const out = { format: 'weird-physics-room/1', savedAt: rec.savedAt, voxel: 0.06, coarse: 0.12, keyOffset: 512, data: {} };
+  for (const [k, v] of Object.entries(rec.data)) {
+    out.data[k] = ArrayBuffer.isView(v) ? { type: v.constructor.name, b64: b64(v) } : v;
+  }
+  return new Blob([JSON.stringify(out)], { type: 'application/json' });
+}
+export async function hasSaved() {
+  try { return !!(await get()); } catch { return false; }
+}
+
 export class RoomStore {
   constructor(renderer) {
     this.renderer = renderer;
