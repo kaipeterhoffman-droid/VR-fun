@@ -3,7 +3,7 @@
 // is far and for the water to reflect, and the cut-out leaves and ferns.
 import * as THREE from 'three';
 import { Builder, col, mulCol, mixCol } from './build.js';
-import { makePaint } from './paint.js';
+import { makePaint, shared } from './paint.js';
 import { floraSheet, barkSheet } from './art.js';
 import * as F from './flora.js';
 import { river, landHeight, wooded, LENGTH } from './river.js';
@@ -34,10 +34,10 @@ function leafTint(s, r) {
  */
 export function buildForest(world, { clearings = [], lineup = false } = {}) {
   const sheet = floraSheet();
-  const solidMat = makePaint({ vertexLit: true, brush: 0.3, brushScale: 0.5, side: THREE.DoubleSide, inside: 0.5, sway: { amp: 0.22, speed: 0.8, flutter: 0.05 }, front: 1.3 });
-  const cutMat = makePaint({ map: sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.86, backlight: 0.12, backColor: '#fff0c0', sway: { amp: 0.35, speed: 1.0, flutter: 0.16 }, front: 1.3 });
+  const solidMat = makePaint({ vertexLit: true, brush: 0.3, brushScale: 0.5, side: THREE.DoubleSide, inside: 0.5, sway: { amp: 0.22, speed: 0.8, flutter: 0.05 }, front: 1.3, canopy: true });
+  const cutMat = makePaint({ map: sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.86, backlight: 0.12, backColor: '#fff0c0', sway: { amp: 0.35, speed: 1.0, flutter: 0.16 }, front: 1.3, canopy: true });
 
-  const barkMat = makePaint({ map: barkSheet(), brush: 0.12, brushScale: 0.6, rim: { color: '#ffffff', strength: 0.6, power: 3.2 }, front: 0.8 });
+  const barkMat = makePaint({ map: barkSheet(), brush: 0.12, brushScale: 0.6, rim: { color: '#ffffff', strength: 0.6, power: 3.2 }, front: 0.8, canopy: true });
   const pool = (fn, seeds) => seeds.map((seed) => [0, 1, 2].map((lod) => fn(seed, lod)));
   const T = {
     spruce: pool(F.spruce, [11, 12, 13, 14, 15, 16]), pine: pool(F.pine, [21, 22, 23]), birch: pool(F.birch, [31, 32, 33, 34]),
@@ -53,6 +53,7 @@ export function buildForest(world, { clearings = [], lineup = false } = {}) {
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), Q2 = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3(), AX = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
   const pt = [0, 0], here = {};
   let count = 0; const stats = [];
+  const crowns = [], CROWN = { spruce: 2.1, pine: 3.2, birch: 2.9, gold: 3.6, snag: 0 };              // every tree's shade, for the map of it below
 
   for (const sec of world.sections) {
     const hi = new Builder(20000), lo = new Builder(4000), loCut = new Builder(12000), cut = new Builder(30000), edge = new Builder(600), bark = new Builder(6000);
@@ -87,7 +88,7 @@ export function buildForest(world, { clearings = [], lineup = false } = {}) {
         hi.add(t.solid, m, kind === 'spruce' ? tint : null); if (t.bark) bark.add(t.bark, m);
         if (t.cut) cut.add(t.cut, m, needle ? tint : lt);
         lo.add(far.solid, m, kind === 'spruce' ? tint : null); if (far.cut) loCut.add(far.cut, m, needle ? tint : lt);
-        count++;
+        count++; if (CROWN[kind]) crowns.push(P.x, P.z, CROWN[kind] * scale);
         // roots that come out of the bank and go down into the water
         if (out < 2.4 && kind !== 'snag') for (let q = 0; q < 2; q++) {
           const m2 = place(ss + (q - 0.5) * 0.9 + (r4 - 0.5), side, 0.25, 0, 0.8 + r5 * 0.8, 0, 0); river.at(Math.min(LENGTH, Math.max(0, ss)), here);
@@ -147,5 +148,20 @@ export function buildForest(world, { clearings = [], lineup = false } = {}) {
     if (loCut.nv) { const m = new THREE.Mesh(loCut.build(), cutMat); m.name = 'far leaves'; world.add(m, s, true); sec.far.push(m); }
     if (edge.nv) { const m = new THREE.Mesh(edge.build(), cutMat); m.name = 'water edge'; world.add(m, s, true); }
   }
+  // ---- the shade of all that, seen from above: a map of how much sky the wood takes, two metres to the cell. The paint
+  // looks its own place up in it (src/ifing/paint.js, `canopy`).
+  { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for (let i = 0; i < crowns.length; i += 3) { x0 = Math.min(x0, crowns[i]); x1 = Math.max(x1, crowns[i]); z0 = Math.min(z0, crowns[i + 1]); z1 = Math.max(z1, crowns[i + 1]); }
+    x0 -= 8; z0 -= 8; x1 += 8; z1 += 8;
+    const CELL = 2, w = Math.ceil((x1 - x0) / CELL), h = Math.ceil((z1 - z0) / CELL), data = new Uint8Array(w * h);
+    for (let i = 0; i < crowns.length; i += 3) {
+      const cx = (crowns[i] - x0) / CELL, cz = (crowns[i + 1] - z0) / CELL, r = crowns[i + 2] / CELL, R = Math.ceil(r * 1.2);
+      for (let iz = Math.max(0, Math.floor(cz - R)); iz <= Math.min(h - 1, Math.ceil(cz + R)); iz++) for (let ix = Math.max(0, Math.floor(cx - R)); ix <= Math.min(w - 1, Math.ceil(cx + R)); ix++) {
+        const d = Math.hypot(ix + 0.5 - cx, iz + 0.5 - cz) / r, a = 0.85 * (1 - smooth(0.55, 1.15, d)), k = iz * w + ix;
+        data[k] = Math.round(255 * (1 - (1 - data[k] / 255) * (1 - a)));                      // (two crowns over one place take more of the sky than one)
+      }
+    }
+    const tex = new THREE.DataTexture(data, w, h, THREE.RedFormat); tex.magFilter = tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
+    shared.tCanopy.value = tex; shared.uCanopy.value.set(x0, z0, 1 / (w * CELL), 1 / (h * CELL)); }
   return { T, solidMat, cutMat, barkMat, sheet, count, stats, extras: { boulders, bigBoulders, ferns, grass, heath, reeds, logs, shrooms, pads, blooms, roots } };
 }

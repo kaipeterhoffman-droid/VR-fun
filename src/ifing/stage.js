@@ -16,8 +16,8 @@ export function buildStage({ world, glows, water, engine }) {
   const two = { side: THREE.DoubleSide };
   const mats = {
     // stone that the moss has found; stone that it has not; worked wood; things painted corner by corner
-    stone: makePaint({ brush: 0.34, brushScale: 0.4, top: { color: '#55702c', from: 0.5, to: 0.92, amount: 0.85 }, wet: 0.25, ...two, inside: 0.7, front: 1 }),
-    bare: makePaint({ brush: 0.3, brushScale: 0.4, wet: 0.2, ...two, inside: 0.8 }),
+    stone: makePaint({ brush: 0.34, brushScale: 0.4, top: { color: '#55702c', from: 0.5, to: 0.92, amount: 0.85 }, wet: 0.25, canopy: true, ...two, inside: 0.7, front: 1 }),
+    bare: makePaint({ brush: 0.3, brushScale: 0.4, wet: 0.2, canopy: true, ...two, inside: 0.8 }),
     wood: makePaint({ map: woodSheet(), brush: 0.16, brushScale: 0.5, ...two, inside: 0.8 }),
     plain: makePaint({ brush: 0.22, brushScale: 0.45, ...two, inside: 0.7 }),
     runes: makePaint({ map: runeSheet(), cutout: true, alphaTest: 0.5, brush: 0, ...two, inside: 1 }),

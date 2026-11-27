@@ -41,6 +41,8 @@ export const shared = {
   uFrontP: { value: new THREE.Vector4(1, 0, 0, 0) },                 // how thick it is; how hard it pushes what sways; how much it lights what takes light
   uFrontColor: { value: C('#000000') },
   tBrush: { value: null },
+  // the shade of the wood, seen from above (src/ifing/forest.js): where it lies on the world, and how much the reach makes of it
+  tCanopy: { value: null }, uCanopy: { value: new THREE.Vector4(0, 0, 1, 1) }, uCanopyGain: { value: 0 },
 };
 
 // ------------------------------------------------------------------------------------------------ shared GLSL
@@ -105,12 +107,14 @@ const LIGHT_PARS = /* glsl */`
   }
   // the light that falls on a place. First the reach's own: three flat tones by how the surface faces the key light,
   // with the sky above and the ground's bounce below...
-  vec3 toneLight(vec3 N, float stroke) {
-    float w = clamp(dot(N, -uKeyDir) * 0.5 + 0.5 + stroke * 0.09, 0.0, 1.0);
+  // (cover: how much of the sky a wood overhead takes from this place. Under trees the three tones fall to the lowest,
+  // by the same steps, so the floor of a wood is pools of shade with the light lying between them.)
+  vec3 toneLight(vec3 N, float stroke, float cover) {
+    float w = clamp(dot(N, -uKeyDir) * 0.5 + 0.5 + stroke * 0.09, 0.0, 1.0) * (1.0 - cover);
     float q = floor(w * 3.0) / 3.0, f = fract(w * 3.0);
     w = mix(w, q + smoothstep(0.38, 0.62, f) / 3.0, 0.82);
     vec3 tone = w < 0.5 ? mix(uShade, uHalf, smoothstep(0.0, 0.5, w)) : mix(uHalf, uLit, smoothstep(0.5, 1.0, w));
-    return (tone + mix(uGroundLight, uSkyLight, N.y * 0.5 + 0.5)) * uLightGain;
+    return (tone + mix(uGroundLight, uSkyLight, N.y * 0.5 + 0.5) * (1.0 - 0.45 * cover)) * uLightGain;
   }
   // ...then the lights that travel: the lantern on the bow, and the four fires that matter most from here
   vec3 lampsLight(vec3 P, vec3 N) {
@@ -191,6 +195,9 @@ const FRAG = /* glsl */`
     ${GLSL_FRONT}
     uniform float uFrontGain;
   #endif
+  #ifdef CANOPY
+    uniform sampler2D tCanopy; uniform vec4 uCanopy; uniform float uCanopyGain;
+  #endif
   varying vec3 vWPos; varying vec3 vN; varying vec3 vView; varying vec2 vUv; varying vec3 vCol;
   // the shared dry-brush strokes, laid from above and from the side (two looks at the picture, no seams on round things)
   vec3 strokes(vec3 p, vec3 n) {
@@ -235,10 +242,15 @@ const FRAG = /* glsl */`
       float tide = smoothstep(uWet * 0.86, uWet * 1.04, hw) * (1.0 - smoothstep(uWet * 1.08, uWet * 1.5, hw));
       albedo += albedo * tide * (0.34 + 0.3 * stroke);
     #endif
+    float cover = 0.0;
+    #ifdef CANOPY
+      // what stands under the wood is in its shade; what stands up through it comes out into the light again
+      cover = texture2D(tCanopy, (vWPos.xz - uCanopy.xy) * uCanopy.zw + stroke * 0.0012).r * uCanopyGain * (1.0 - smoothstep(2.0, 7.0, vWPos.y));
+    #endif
     #ifdef VERTEX_LIT
-      vec3 c = albedo * (toneLight(N, stroke) + vLight);
+      vec3 c = albedo * (toneLight(N, stroke, cover) + vLight);
     #else
-      vec3 c = albedo * (toneLight(N, stroke) + lampsLight(vWPos, N));
+      vec3 c = albedo * (toneLight(N, stroke, cover) + lampsLight(vWPos, N));
     #endif
     vec3 V = normalize(cameraPosition - vWPos);
     #ifdef MIRROR
@@ -283,7 +295,7 @@ const FRAG = /* glsl */`
 const defaults = {
   color: '#ffffff', map: null, cutout: false, alphaTest: 0.5, side: THREE.FrontSide, vertexLit: false, vertexColors: true,
   brush: 0.16, brushScale: 0.3, top: null, wet: 0, backlight: 0, backColor: '#ffffff', rim: null, emissive: '#000000', emissiveIntensity: 1,
-  sway: null, fogScale: 1, mirror: false, transparent: false, inside: 0.55, clipBelow: false, front: 0,
+  sway: null, fogScale: 1, mirror: false, transparent: false, inside: 0.55, clipBelow: false, front: 0, canopy: false,
 };
 
 /**
@@ -301,6 +313,7 @@ const defaults = {
  *   inside              how dark the back of a two-sided thing is (the inside of a skirt of boughs)
  *   fogScale            below 1 for very large far things that must loom through the air
  *   front               how much of a passing front's light the thing takes (0 = none; see GLSL_FRONT)
+ *   canopy              the wood overhead shades it (the ground, what grows on it, the feet of trees, stones)
  *   clipBelow           for things that go down into the water (a hull, a paddle): the part under it is not reflected
  *   side
  */
@@ -320,6 +333,7 @@ export function makePaint(opts = {}) {
   if (o.mirror) defines.MIRROR = '';
   if (o.clipBelow) defines.CLIP_BELOW = '';
   if (o.front > 0) defines.FRONT = '';
+  if (o.canopy) defines.CANOPY = '';
   const top = o.top || {}, rim = o.rim || {}, sw = o.sway || {};
   const rc = C(rim.color ?? '#ffffff');
   const uniforms = {

@@ -36,7 +36,7 @@ export const LOOKS = {
     keyDir: dir(0.12, -0.3, 1), shade: C('#15243e'), half: C('#33495f'), lit: C('#aebfbe', 1.0), skyLight: C('#2a4260', 0.55), groundLight: C('#16222f'), gain: 2.6,
     exposure: 1.25, tint: C('#ffffff'), lift: C('#02040a'), sat: 0.96, contrast: 1.04,
     deep: C('#07142a'), mirrorDark: 0.22, mirrorSat: 1.0, waver: 0.7, mirrorTint: C('#e6f0ff'), waves: 0.24, fresnel: 0.42, clarity: 0.75,
-    lantern: C('#ffb054'), lanternPower: 0.9, lanternRadius: 8, wind: 0.5,
+    lantern: C('#ffb054'), lanternPower: 0.9, lanternRadius: 8, wind: 0.5, canopy: 0.7,
   },
   iron: {
     zenith: C('#060f22'), mid: C('#0d2233'), horizon: C('#173a40'),
@@ -46,7 +46,7 @@ export const LOOKS = {
     keyDir: dir(0.25, -0.9, 0.3), shade: C('#07131a'), half: C('#1a3238'), lit: C('#7d9a8e', 1.0), skyLight: C('#0f2c36', 0.7), groundLight: C('#050e0c'), gain: 3.4,
     exposure: 1.3, tint: C('#f6fbff'), lift: C('#020506'), sat: 0.86, contrast: 1.05,
     deep: C('#030b0c'), mirrorDark: 0.3, mirrorSat: 1.0, waver: 0.9, mirrorTint: C('#dff5ea'), waves: 0.22, fresnel: 0.36, clarity: 0.8,
-    lantern: C('#ffa544'), lanternPower: 1.5, lanternRadius: 11, wind: 0.35,
+    lantern: C('#ffa544'), lanternPower: 1.5, lanternRadius: 11, wind: 0.35, canopy: 0.85,
   },
   ve: {
     zenith: C('#06102c'), mid: C('#11305a'), horizon: C('#487296'),
@@ -56,7 +56,7 @@ export const LOOKS = {
     keyDir: moonDir.clone().multiplyScalar(-1).setY(-0.42).normalize(), shade: C('#0a1a30'), half: C('#254462'), lit: C('#b9cbe8', 1.0), skyLight: C('#17304e', 0.6), groundLight: C('#08111e'), gain: 2.6,
     exposure: 1.2, tint: C('#f7f8ff'), lift: C('#02030a'), sat: 0.9, contrast: 1.06,
     deep: C('#040b1c'), mirrorDark: 0.14, mirrorSat: 0.95, waver: 0.45, mirrorTint: C('#eef2ff'), waves: 0.3, fresnel: 0.5, clarity: 0.8,
-    lantern: C('#ffab4c'), lanternPower: 1.0, lanternRadius: 9, wind: 0.25,
+    lantern: C('#ffab4c'), lanternPower: 1.0, lanternRadius: 9, wind: 0.25, canopy: 0.7,
   },
   glasir: {
     zenith: C('#04061a'), mid: C('#0a1030'), horizon: C('#1b1d3c'),
@@ -66,7 +66,7 @@ export const LOOKS = {
     keyDir: dir(-0.15, -0.97, 0.2), shade: C('#0e0e26'), half: C('#3a2b1c'), lit: C('#ffd488', 0.74), skyLight: C('#3a2a10', 0.6), groundLight: C('#16152c'), gain: 2.3,
     exposure: 1.1, tint: C('#fffaf0'), lift: C('#03030a'), sat: 1.02, contrast: 1.06,
     deep: C('#04040a'), mirrorDark: 0.16, mirrorSat: 1.05, waver: 0.6, mirrorTint: C('#fff4e4'), waves: 0.22, fresnel: 0.42, clarity: 0.8,
-    lantern: C('#ffb860'), lanternPower: 0.8, lanternRadius: 8, wind: 0.6,
+    lantern: C('#ffb860'), lanternPower: 0.8, lanternRadius: 8, wind: 0.6, canopy: 0.25,
   },
   arch: {
     zenith: C('#03040c'), mid: C('#070a18'), horizon: C('#0d1426'),
@@ -76,7 +76,7 @@ export const LOOKS = {
     keyDir: treeDir.clone().multiplyScalar(-1).setY(-0.25).normalize(), shade: C('#05070f'), half: C('#141c36'), lit: C('#8fa6d0', 1.0), skyLight: C('#0a1228', 0.8), groundLight: C('#04060c'), gain: 3.0,
     exposure: 1.25, tint: C('#f2f5ff'), lift: C('#020308'), sat: 0.95, contrast: 1.05,
     deep: C('#02040a'), mirrorDark: 0.3, mirrorSat: 1.0, waver: 0.6, mirrorTint: C('#e6ecff'), waves: 0.25, fresnel: 0.4, clarity: 0.9,
-    lantern: C('#ffa848'), lanternPower: 1.4, lanternRadius: 10, wind: 0.15,
+    lantern: C('#ffa848'), lanternPower: 1.4, lanternRadius: 10, wind: 0.15, canopy: 0,
   },
   well: {
     zenith: C('#04061c'), mid: C('#0c1848'), horizon: C('#2c5486'),
@@ -86,7 +86,7 @@ export const LOOKS = {
     keyDir: dir(0.2, -0.75, 0.5), shade: C('#2a3560'), half: C('#56689a'), lit: C('#e4eeff', 1.3), skyLight: C('#1c3470', 0.6), groundLight: C('#0c1638'), gain: 2.2,
     exposure: 1.2, tint: C('#f6fbff'), lift: C('#02030a'), sat: 1.05, contrast: 1.05,
     deep: C('#030818'), mirrorDark: 0.08, mirrorSat: 1.05, waver: 0.22, mirrorTint: C('#f2f6ff'), waves: 0.14, fresnel: 0.6, clarity: 0.6,
-    lantern: C('#ffb054'), lanternPower: 0.8, lanternRadius: 8, wind: 0.1,
+    lantern: C('#ffb054'), lanternPower: 0.8, lanternRadius: 8, wind: 0.1, canopy: 0,
   },
 };
 
@@ -140,6 +140,7 @@ export function applyLook(L, sky, water) {
   u.uSkyLight.value.copy(L.skyLight); u.uGroundLight.value.copy(L.groundLight); u.uLightGain.value = L.gain;
   u.uLanternRadius.value = L.lanternRadius;
   u.uWind.value.z = L.wind;
+  u.uCanopyGain.value = L.canopy;
   u.uMirror.value.set(L.mirrorDark, L.mirrorSat, L.waver, 0); u.uMirrorTint.value.copy(L.mirrorTint);
   if (sky) {
     const k = sky.uniforms;
