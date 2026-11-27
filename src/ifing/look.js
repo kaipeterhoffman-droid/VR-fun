@@ -83,7 +83,7 @@ export const LOOKS = {
     glowDir: treeDir.clone().setY(0.05).normalize(), glow: C('#8fd0c8', 0.45), glowSize: 7, halo: C('#20466e', 0.5), haloSize: 1.8,
     moonDir, moon: C('#000000'), moonSize: 0.02, stars: 1.0, clouds: 0.12, cloudLit: C('#5a7ab0'), cloudDark: C('#0a1230'), aurora: 1,
     fog: C('#10244e'), fogDensity: 0.0019, mist: C('#6f95c0'), mistAmount: 0.16, mistHeight: 0.9, fogGlow: C('#4fa49c', 0.3),
-    keyDir: dir(0.2, -0.75, 0.5), shade: C('#101a44'), half: C('#3c5490'), lit: C('#e4eeff', 1.35), skyLight: C('#1c3470', 0.6), groundLight: C('#0c1638'), gain: 2.2,
+    keyDir: dir(0.2, -0.75, 0.5), shade: C('#2a3560'), half: C('#56689a'), lit: C('#e4eeff', 1.3), skyLight: C('#1c3470', 0.6), groundLight: C('#0c1638'), gain: 2.2,
     exposure: 1.2, tint: C('#f6fbff'), lift: C('#02030a'), sat: 1.05, contrast: 1.05,
     deep: C('#030818'), mirrorDark: 0.08, mirrorSat: 1.05, waver: 0.22, mirrorTint: C('#f2f6ff'), waves: 0.14, fresnel: 0.6, clarity: 0.6,
     lantern: C('#ffb054'), lanternPower: 0.8, lanternRadius: 8, wind: 0.1,

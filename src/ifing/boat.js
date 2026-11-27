@@ -23,8 +23,8 @@ export const EYE = 0.95;
 // where there is something to look at, and still at the well. The current has a thread, the line the deepest water
 // takes, and the water either side of it leans toward it; so a boat left to itself is carried round the giant's
 // hand, between the gate's posts, along the stone ship and through the gap in the loom, and never into a bank.
-const CURRENT = [[-40, 0.5], [0, 0.5], [40, 0.8], [150, 0.95], [262, 0.9], [286, 0.55], [318, 0.6], [340, 0.9], [366, 0.62], [400, 0.5], [440, 0.55], [560, 0.6], [600, 0.95], [700, 0.85], [728, 0.5], [790, 0.55], [808, 0.85], [880, 0.6], [960, 0.3], [1010, 0.0]];
-const THREAD = [[-40, -1.5], [0, -1.5], [46, 0], [280, 0], [298, 2.5], [314, 2.5], [334, 0], [440, 0], [462, 2.6], [500, 2.6], [530, 0], [760, 0], [772, 1.2], [786, 1.2], [800, 0], [1060, 0]];
+const CURRENT = [[-40, 0.5], [0, 0.5], [40, 0.8], [150, 0.95], [262, 0.9], [286, 0.55], [318, 0.6], [340, 0.9], [366, 0.62], [400, 0.5], [440, 0.55], [560, 0.6], [600, 0.95], [700, 0.85], [728, 0.5], [790, 0.55], [808, 0.85], [880, 0.6], [940, 0.5], [984, 0.42], [1000, 0.22], [1008, 0.06], [1012, 0.0]];
+const THREAD = [[-40, -1.5], [0, -1.5], [46, 0], [280, 0], [298, 2.5], [314, 2.5], [334, 0], [440, 0], [462, 2.6], [500, 2.6], [530, 0], [760, 0], [772, 1.2], [786, 1.2], [800, 0], [960, 0], [1004, 4.5], [1060, 4.5]];
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), v4 = new THREE.Vector3(), m4 = new THREE.Matrix4(), q1 = new THREE.Quaternion();
 const lerp = (a, b, t) => a + (b - a) * t, ease = (q) => q * q * (3 - 2 * q);

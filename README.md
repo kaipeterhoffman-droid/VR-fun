@@ -9,7 +9,7 @@ WebXR toys for Quest 3, built on Meta's Immersive Web SDK.
 
 ## Ífing (a river by canoe)
 
-A kilometre of river through a forest out of the old North, at night, in a small boat with a pair of oars. No score and nothing to win: the boathouse at blue hour, the Ironwood and the giant asleep in its hillside, a gatehouse and a ship of standing stones, a golden grove. Everything in it is made in code; there are no model, image or sound files.
+A kilometre of river through a forest out of the old North, at night, in a small boat with a pair of oars. No score and nothing to win: the boathouse at blue hour, the Ironwood and the giant asleep in its hillside, a gatehouse and a ship of standing stones, a golden grove, and the well under the white tree where the river ends. Everything in it is made in code; there are no model, image or sound files.
 
 **Play:** https://kaipeterhoffman-droid.github.io/VR-fun/ifing/ then press **Enter the river**. Sit down first.
 
@@ -21,7 +21,9 @@ You are not the only thing alive on it. Moths keep to the lantern, midges dance 
 
 And each great thing sends something out through the air. The giant's breath pours off his lip, crosses the pool, lays the reeds over and gutters your lantern when it arrives. Sound the horn at the gate and the hail runs down the mere, lighting the wood on both shores, and seven standing stones answer it one after another. Light goes down the stone ship at every stroke of her crew. A shuttle crosses the loom and the warp sings where it passes. The wind you hear is the wind the trees are leaning in.
 
-On a desktop, drag to look and use the arrow keys to row. Add `?from=370` to the address to set off just above the gatehouse, or `?from=640` at the head of the golden grove.
+The river ends at the Well of Urd. Past the last bend it goes under an arch of roots where glow-worms hang, and opens on still water under the northern lights, with the white tree standing in it a third of a kilometre tall and two swans keeping their distance. The current sets you down beside a skerry where a fire is kept before three stones. Their names light one after another, the tree answers with a ring of light that crosses the whole well, and then a thread is let down out of the crown and made fast to your lantern. After that there is nothing left to do, which is the idea.
+
+On a desktop, drag to look and use the arrow keys to row. Add `?from=370` to the address to set off just above the gatehouse, `?from=640` at the head of the golden grove, or `?from=800` just above the well.
 
 ## Trick Shot (two players, one headset)
 

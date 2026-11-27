@@ -9,6 +9,7 @@ import { buildNaust } from './naust.js';
 import { buildIronwood } from './ironwood.js';
 import { buildVe } from './ve.js';
 import { buildGlasir } from './glasir.js';
+import { buildWell } from './well.js';
 import { buildLife } from './life.js';
 
 export function buildStage({ world, glows, water, engine }) {
@@ -63,6 +64,7 @@ export function buildStage({ world, glows, water, engine }) {
   buildIronwood(ctx);
   buildVe(ctx);
   buildGlasir(ctx);
+  buildWell(ctx);
   buildLife(ctx);
   return {
     clearings: ctx.clearings, obstacles: ctx.obstacles, lights: ctx.lights, sounds: ctx.sounds, hits: ctx.hits, ctx,
