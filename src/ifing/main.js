@@ -55,6 +55,7 @@ async function begin() {
   const look = blankLook();
   const preview = Q.has('s') || Q.has('shot') || lineup;                // a still for looking at: the boat is put where asked and held there
   boat.place(START.s, START.d, START.turn);
+  if (Q.has('from')) boat.place(num('from', START.s), 0, 0);            // ?from=380: set off from further down the river, to try one reach
   if (preview) { boat.frozen = true; if (Q.has('s')) boat.place(num('s', 2), num('d', 0), num('turn', 0) * Math.PI / 180); boat.view.yaw = num('yaw', 0) * Math.PI / 180; boat.view.pitch = num('pitch', 0) * Math.PI / 180; }
   if (Q.has('noboat')) { boat.group.visible = false; boat.paddle.visible = false; boat.glow.on = 0; }
   let time = num('t', 0);
