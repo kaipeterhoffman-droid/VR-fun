@@ -23,7 +23,7 @@ function cutTexture(cv, bleed, opts = {}) {
   }
   const t = new THREE.DataTexture(new Uint8Array(d.buffer), cv.width, cv.height, THREE.RGBAFormat);
   t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   if (opts.repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; } else if (opts.repeatX) { t.wrapS = THREE.RepeatWrapping; }
   t.needsUpdate = true;
   return t;
@@ -31,7 +31,7 @@ function cutTexture(cv, bleed, opts = {}) {
 function plainTexture(cv, opts = {}) {
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = opts.data ? THREE.NoColorSpace : THREE.SRGBColorSpace; t.flipY = false;
-  t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.anisotropy = 4;
+  t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.anisotropy = 8;
   if (opts.repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
   return t;
 }
@@ -39,7 +39,7 @@ function plainTexture(cv, opts = {}) {
 // ------------------------------------------------------------------------------------------------ the brush
 /** The shared dry-brush tile: streaks of a loaded and a starved brush on mid grey. It repeats without a seam. */
 export function brushTile() {
-  const n = 512, cv = canvas(n, n), g = cv.getContext('2d'), rnd = rng(11);
+  const n = 512, cv = canvas(n * 2, n * 2), g = cv.getContext('2d'), rnd = rng(11); g.scale(2, 2);      // laid out on 512, painted at twice that
   g.fillStyle = '#808080'; g.fillRect(0, 0, n, n);
   g.lineCap = 'round';
   const streak = (x, y, len, ang, w, v, a) => {
@@ -368,7 +368,7 @@ export function floraSheet() {
 export const BARK_U = { spruce: [0.004, 0.246], pine: [0.254, 0.496], red: [0.504, 0.746], birch: [0.754, 0.996] };
 export function barkSheet() {
   if (barkSheet.made) return barkSheet.made;
-  const S = 512, W = 128, cv = canvas(S, S), g = cv.getContext('2d'); g.lineCap = 'round';
+  const S = 512, W = 128, cv = canvas(S * 2, S * 2), g = cv.getContext('2d'); g.scale(2, 2); g.lineCap = 'round';
   const strip = (i, base, paint) => { g.save(); g.beginPath(); g.rect(i * W, 0, W, S); g.clip(); g.fillStyle = rgb(base[0], base[1], base[2], 1); g.fillRect(i * W, 0, W, S); g.translate(i * W, 0); paint(rng(300 + i)); g.restore(); };
   const vline = (x, y, len, w, c, a, wob, rnd) => { for (const o of [-S, 0, S]) { g.strokeStyle = rgb(c[0], c[1], c[2], a); g.lineWidth = w; g.beginPath(); let xx = x; g.moveTo(xx, y + o); const r2 = rng(Math.floor(x * 7 + y * 13)); for (let t = 0; t < len; t += 8) { xx += (r2() - 0.5) * wob; g.lineTo(xx, y + o + t); } g.stroke(); } };
   const flake = (x, y, w, h, c, a) => { for (const o of [-S, 0, S]) { g.fillStyle = rgb(c[0], c[1], c[2], a); g.beginPath(); g.ellipse(x, y + o, w, h, 0, 0, TAU); g.fill(); } };
@@ -479,7 +479,7 @@ const WOOD_SLOT = (i) => [i / 8 + 0.003, (i + 1) / 8 - 0.003];
 export const WOOD_U = { tar: WOOD_SLOT(0), grey: WOOD_SLOT(1), pale: WOOD_SLOT(2), carved: WOOD_SLOT(3), shingle: WOOD_SLOT(4) };
 export function woodSheet() {
   if (woodSheet.made) return woodSheet.made;
-  const S = 512, W = 128, cv = canvas(W * 8, S), g = cv.getContext('2d'); g.lineCap = 'round';
+  const S = 512, W = 128, cv = canvas(W * 16, S * 2), g = cv.getContext('2d'); g.scale(2, 2); g.lineCap = 'round';
   const strip = (i, base, paint) => { g.save(); g.beginPath(); g.rect(i * W, 0, W, S); g.clip(); g.fillStyle = rgb(base[0], base[1], base[2], 1); g.fillRect(i * W, 0, W, S); g.translate(i * W, 0); paint(rng(500 + i)); g.restore(); };
   // a line of grain: long, nearly straight, running the length of the strip and closing on itself
   const grain = (x, w, c, a, wob, rnd, y0 = 0, len = S) => {

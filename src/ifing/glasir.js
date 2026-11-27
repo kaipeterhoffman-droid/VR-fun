@@ -62,6 +62,13 @@ function tree(ctx, forest) {
   // ---- the limbs, and on them the leaves: bells of gold, the low ones weeping toward the water
   const tintAt = (body) => (z) => (z === 0 ? mixCol(body, G_TOP, 0.6) : z === 1 ? mixCol(body, G_TOP, 0.3) : z === 2 ? body : mixCol(body, G_RED, 0.6));
   const crown = (x, y, z, r, weep = 0.9) => { const w = rnd(); bell(lf, x, y + r * 0.2, z, r, r * 0.62, r * weep * (0.8 + rnd() * 0.5), 10, REG, tintAt(mixCol(G_MID, G_RED, w * w * 0.7)), 0.7, rnd); };
+  // under the rim of a low crown hang smaller bells at their own heights, as wisteria hangs: a garden of them, not one sheet
+  const weepers = (x, y, z, r, n) => {
+    for (let k = 0; k < n; k++) {
+      const a = rnd() * TAU, d = r * (0.45 + 0.5 * rnd()), rr = 1.5 + rnd() * 1.3, w = rnd();
+      bell(lf, x + Math.cos(a) * d, y - r * 0.2 - rnd() * 2.6, z + Math.sin(a) * d, rr, rr * 0.5, rr * (1.5 + rnd() * 1.4), 6, REG, tintAt(mixCol(G_TOP, G_MID, w)), 1.0, rnd);
+    }
+  };
   const LOOM = [[-1.2, 10.6, 1.0, 1.3], [-5.5, 12.4, 1.7, 1.1], [-12, 13.2, 2.0, 0.9], [-19.5, 13.1, 1.8, 0.7], [-26.5, 12.9, 1.4, 0.52], [-32, 13.8, 0.9, 0.3], [-35.5, 15.5, 0.4, 0.12]];
   const LIMBS = [
     [[-0.5, 14, 0.5, 1.5], [-3, 20, 3, 1.2], [-7, 26, 6, 0.9], [-11, 31, 9, 0.6], [-14, 35, 11, 0.3]],
@@ -78,18 +85,18 @@ function tree(ctx, forest) {
     tube(bk, L, 8, () => pale(0.9), null, true, U, 4);
     for (let i = 2; i < L.length; i++) {
       const p = L[i], low = p[0] < -4 && p[1] < 28;                                         // over the water: these hang their hems down
-      crown(p[0], p[1] + 1, p[2], 5.2 + rnd() * 2.6, low ? 1.5 : 0.9);
+      { const r = 5.2 + rnd() * 2.6; crown(p[0], p[1] + 1, p[2], r, 0.85); if (low) weepers(p[0], p[1] + 1, p[2], r, 6); }
       // a spray off the limb, and its own bell
       const a = rnd() * TAU, len = 4 + rnd() * 4, q = [p[0] + Math.cos(a) * len, p[1] + 2 + rnd() * 3, p[2] + Math.sin(a) * len];
       tube(bk, [[p[0], p[1], p[2], p[3] * 0.6], [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2 + 0.6, (p[2] + q[2]) / 2, p[3] * 0.4], [q[0], q[1], q[2], 0.08]], 5, () => pale(0.85), null, false, U, 4);
-      crown(q[0], q[1], q[2], 4 + rnd() * 2.4, low ? 1.4 : 0.9);
+      { const r = 4 + rnd() * 2.4; crown(q[0], q[1], q[2], r, 0.85); if (low) weepers(q[0], q[1], q[2], r, 4); }
     }
   }
   for (const [x, y, z, r] of [[-30, 16.5, 0.8, 4.6], [-35, 17.5, 0.2, 4.2], [-33, 20, 3, 4.5], [-8, 17.5, 3.5, 3.6], [-16, 18.5, 4.5, 3.8], [-23.5, 18, 3.6, 3.6]]) crown(x, y, z, r, 0.7);      // on the loom's limb, clear of the web
   for (let k = 0; k < 16; k++) { const a = rnd() * TAU, d = 4 + rnd() * 15, y = 30 + rnd() * 12 - d * 0.5; crown(Math.cos(a) * d - 3, y, Math.sin(a) * d, 5 + rnd() * 3, 0.8); }                    // the head of the crown
 
   const barkMat = makePaint({ map: barkSheet(), color: '#fff0d4', brush: 0.12, brushScale: 0.6, rim: { color: '#ffe2a8', strength: 0.6, power: 3 }, fogScale: 0.5 });
-  const leafMat = makePaint({ map: forest.sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.92, backlight: 0.4, backColor: '#ffd070', emissive: '#7a5012', fogScale: 0.5, sway: { amp: 0.35, speed: 1.0, flutter: 0.16 } });
+  const leafMat = makePaint({ map: forest.sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.92, backlight: 0.4, backColor: '#ffd070', emissive: '#5a3a10', fogScale: 0.5, sway: { amp: 0.35, speed: 1.0, flutter: 0.16 } });
   const grp = new THREE.Group(); grp.name = 'Glasir';
   { const b = new Builder(bk.nv); b.add(bk, F); grp.add(new THREE.Mesh(b.build({ bend: false }), barkMat)); const l = new Builder(lf.nv); l.add(lf, F); grp.add(new THREE.Mesh(l.build(), leafMat)); }
   const twin = ctx.world.add(grp, null, true);                                             // too big to belong to one stretch of the river: it is shown from the head of its reach
@@ -165,23 +172,30 @@ function stag(ctx) {
   for (const sx of [-1, 1]) {
     tube(head, [[sx * 0.09, 0.08, 0.0, 0.04], [sx * 0.2, 0.15, -0.04, 0.046], [sx * 0.31, 0.2, -0.06, 0.012]], 4, W, null, true);          // an ear
     lump(head, sx * 0.112, 0.045, 0.17, 0.024, 0.028, 0.032, 0, 3, 0, () => [0.02, 0.03, 0.06]);                                      // an eye
-    const main = [[sx * 0.07, 0.1, 0.0, 0.04], [sx * 0.2, 0.42, -0.12, 0.036], [sx * 0.38, 0.8, -0.22, 0.032], [sx * 0.5, 1.2, -0.16, 0.027], [sx * 0.5, 1.55, 0.02, 0.02], [sx * 0.42, 1.82, 0.2, 0.008]];
+    // Eikþyrnir, oak-thorn: beams that sweep out and back and up like boughs, and every tine forks as a twig does
+    const main = [[sx * 0.07, 0.1, 0.0, 0.052], [sx * 0.25, 0.46, -0.15, 0.047], [sx * 0.5, 0.9, -0.28, 0.041], [sx * 0.72, 1.38, -0.24, 0.035], [sx * 0.8, 1.84, -0.04, 0.027], [sx * 0.7, 2.2, 0.2, 0.01]];
     tube(head, main, 5, BONE, null, true);
-    const tine = (o, d, len, r) => tube(head, [[o[0], o[1], o[2], r], [o[0] + d[0] * len * 0.55, o[1] + d[1] * len * 0.5, o[2] + d[2] * len * 0.55, r * 0.72], [o[0] + d[0] * len, o[1] + d[1] * len + len * 0.14, o[2] + d[2] * len, r * 0.15]], 4, BONE, null, true);
-    tine(main[0], [sx * 0.25, 0.5, 0.85], 0.44, 0.028); tine(main[1], [sx * 0.3, 0.45, 0.85], 0.4, 0.026); tine(main[2], [sx * 0.2, 0.5, 0.85], 0.38, 0.024);
-    tine(main[3], [sx * 0.55, 0.75, -0.35], 0.4, 0.022); tine(main[4], [-sx * 0.3, 0.85, -0.4], 0.36, 0.02); tine(main[4], [sx * 0.5, 0.8, 0.3], 0.3, 0.02);
+    const tine = (o, d, len, r, fork = 0) => {
+      const m = [o[0] + d[0] * len * 0.55, o[1] + d[1] * len * 0.5, o[2] + d[2] * len * 0.55], e = [o[0] + d[0] * len, o[1] + d[1] * len + len * 0.14, o[2] + d[2] * len];
+      tube(head, [[o[0], o[1], o[2], r], [m[0], m[1], m[2], r * 0.72], [e[0], e[1], e[2], r * 0.15]], 4, BONE, null, true);
+      if (fork) tube(head, [[m[0], m[1], m[2], r * 0.6], [m[0] + sx * fork * 0.5 + d[0] * len * 0.2, m[1] + len * 0.34, m[2] - d[2] * len * 0.15, r * 0.12]], 4, BONE, null, true);
+    };
+    tine(main[0], [sx * 0.25, 0.5, 0.85], 0.52, 0.034); tine(main[1], [sx * 0.3, 0.45, 0.85], 0.5, 0.032, 0.3); tine(main[2], [sx * 0.2, 0.5, 0.85], 0.5, 0.03, 0.35);
+    tine(main[3], [sx * 0.6, 0.7, -0.35], 0.56, 0.028, 0.4); tine(main[3], [sx * 0.1, 0.6, 0.8], 0.42, 0.026);
+    tine(main[4], [-sx * 0.35, 0.85, -0.4], 0.5, 0.025, -0.3); tine(main[4], [sx * 0.6, 0.75, 0.3], 0.46, 0.025, 0.3); tine(main[4], [sx * 0.2, 0.5, -0.8], 0.4, 0.022);
   }
   lump(head, 0, -0.105, 0.54, 0.03, 0.025, 0.02, 0, 4, 0, () => [0.05, 0.05, 0.08]);
-  const mat = makePaint({ color: '#eef2fa', brush: 0.25, brushScale: 0.9, emissive: '#28323f', rim: { color: '#ffffff', strength: 0.9, power: 2.2 } });
-  const grp = new THREE.Group(); grp.name = 'Eikthyrnir'; grp.position.copy(p);
+  const mat = makePaint({ color: '#eef2fa', brush: 0.25, brushScale: 0.9, emissive: '#3a4759', rim: { color: '#ffffff', strength: 0.9, power: 2.2 } });
+  const K = 1.5;                                                         // half again the size of a red deer: he is not one
+  const grp = new THREE.Group(); grp.name = 'Eikthyrnir'; grp.position.copy(p); grp.scale.setScalar(K);
   const dir = [here.rx * 0.8 - here.tx * 0.6, here.rz * 0.8 - here.tz * 0.6], yaw = Math.atan2(dir[0], dir[1]); grp.rotation.y = yaw;        // across the river and a little upstream: toward whoever is coming
   const hd = new THREE.Mesh(head.build({ uv: false, bend: false }), mat); hd.position.set(0, 2.44, 1.18);
   grp.add(new THREE.Mesh(body.build({ uv: false, bend: false }), mat), hd);
   ctx.world.addMoving(grp);
-  ctx.obstacles.push({ x: p.x, z: p.z, r: 1.1 });
-  ctx.lights.push({ position: V3(p.x, 1.9, p.z), color: new THREE.Color('#bcd4ff'), radius: 7, intensity: 0.5 });
+  ctx.obstacles.push({ x: p.x, z: p.z, r: 1.6 });
+  ctx.lights.push({ position: V3(p.x + dir[0] * 2.6, 1.5, p.z + dir[1] * 2.6), color: new THREE.Color('#bcd4ff'), radius: 9, intensity: 0.6 });      // before him, over the water: his own whiteness given back
   // what drips from his antlers: three drops at a time, each ringing the water where it lands
-  const cs = Math.cos(yaw), sn = Math.sin(yaw), tips = [[-0.5, 4.0, 1.25], [0.55, 4.1, 1.15], [0.15, 3.0, 1.75]].map(([x, y, z]) => V3(p.x + x * cs + z * sn, y, p.z - x * sn + z * cs));
+  const cs = Math.cos(yaw), sn = Math.sin(yaw), tips = [[-0.72, 4.5, 1.3], [0.76, 4.55, 1.2], [0.22, 3.1, 1.85]].map(([x, y, z]) => V3(p.x + (x * cs + z * sn) * K, y * K + p.y, p.z + (-x * sn + z * cs) * K));
   const drops = tips.map((t, i) => ({ t, glow: ctx.glows.add({ position: t.clone(), size: 0.07, color: new THREE.Color('#cfe4ff'), power: 0 }), ph: i * 0.37, last: 0 }));
   let look = 0;
   ctx.ticks.push((dt, time, boat, lk, eye) => {

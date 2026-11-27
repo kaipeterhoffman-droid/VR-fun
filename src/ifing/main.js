@@ -98,7 +98,7 @@ async function begin() {
   if (enter) {
     enter.disabled = false; enter.textContent = vr ? 'Enter the river' : 'Begin';
     enter.addEventListener('click', async () => {
-      if (vr) { try { boat.seat.set = false; await engine.enterVR(num('sharp', 1.1), num('fov', 0.6)); } catch (e) { console.warn('could not enter VR', e); } }
+      if (vr) { try { boat.seat.set = false; await engine.enterVR(Q.has('sharp') ? num('sharp', 1.35) : null, num('fov', 0.5)); } catch (e) { console.warn('could not enter VR', e); } }
       card.classList.add('gone');
     });
     engine.onExit = () => { card.classList.remove('gone'); };

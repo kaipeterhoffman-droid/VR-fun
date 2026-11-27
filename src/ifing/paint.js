@@ -170,8 +170,11 @@ const FRAG = /* glsl */`
   // the shared dry-brush strokes, laid from above and from the side (two looks at the picture, no seams on round things)
   float strokes(vec3 p, vec3 n) {
     float up = smoothstep(0.35, 0.8, abs(n.y));
-    float a = texture2D(tBrush, p.xz * uBrushScale).r, b = texture2D(tBrush, vec2(p.x + p.z, p.y * 1.3) * uBrushScale).r;
-    return clamp((mix(b, a, up) - 0.5) * 4.0, -1.0, 1.0);
+    vec2 top = p.xz * uBrushScale, side = vec2(p.x + p.z, p.y * 1.3) * uBrushScale;
+    float a = texture2D(tBrush, top).r, b = texture2D(tBrush, side).r;
+    // within arm's reach and a little beyond, the same brush again four times finer: the hairs inside the stroke
+    float fine = (texture2D(tBrush, (up > 0.5 ? top : side) * 4.3 + 0.37).r - 0.5) * (1.0 - smoothstep(1.5, 9.0, length(vView)));
+    return clamp((mix(b, a, up) - 0.5) * 4.0 + fine * 2.2, -1.0, 1.0);
   }
   void main() {
     vec3 N = normalize(vN);
@@ -180,7 +183,7 @@ const FRAG = /* glsl */`
       if (!gl_FrontFacing) { N = -N; albedo *= uInside; }
     #endif
     #ifdef USE_MAP
-      vec4 tx = texture2D(tMap, vUv); albedo *= tx.rgb; alpha = tx.a;
+      vec4 tx = texture2D(tMap, vUv, -0.5); albedo *= tx.rgb; alpha = tx.a;      // (half a level sharper than the mip the screen asks for: the multisampling carries it)
       #ifdef CUTOUT
         // a cut-out with a soft, anti-aliased edge (the headset's multisampling takes the alpha as coverage)
         alpha = clamp((alpha - uAlphaTest) / max(fwidth(alpha), 1e-4) + 0.5, 0.0, 1.0);
