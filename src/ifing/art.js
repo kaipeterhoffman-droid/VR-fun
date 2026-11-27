@@ -6,6 +6,7 @@ import { rng, fbm2, noise2, clamp } from './noise.js';
 
 const TAU = Math.PI * 2;
 
+const hash1 = (v) => { const q = Math.sin(v * 127.1) * 43758.5453; return q - Math.floor(q); };
 function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 const rgb = (r, g, b, a = 1) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
 const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
@@ -37,31 +38,98 @@ function plainTexture(cv, opts = {}) {
 }
 
 // ------------------------------------------------------------------------------------------------ the brush
-/** The shared dry-brush tile: streaks of a loaded and a starved brush on mid grey. It repeats without a seam. */
+/**
+ * The shared dry-brush tile, three pictures in one. Red: the streaks of a loaded and a starved brush, which the paint
+ * takes as light and dark. Green: a second laying of the same brush across the first, taken as warm and cool. Blue:
+ * where the wash pooled and where it ran thin, in soft patches a hand or two across. It repeats without a seam.
+ */
 export function brushTile() {
-  const n = 512, cv = canvas(n * 2, n * 2), g = cv.getContext('2d'), rnd = rng(11); g.scale(2, 2);      // laid out on 512, painted at twice that
-  g.fillStyle = '#808080'; g.fillRect(0, 0, n, n);
-  g.lineCap = 'round';
-  const streak = (x, y, len, ang, w, v, a) => {
-    for (const ox of [-n, 0, n]) for (const oy of [-n, 0, n]) {
-      const x0 = x + ox, y0 = y + oy;
-      if (x0 < -120 || x0 > n + 120 || y0 < -120 || y0 > n + 120) continue;
-      g.strokeStyle = rgb(v, v, v, a); g.lineWidth = w;
-      g.beginPath(); g.moveTo(x0, y0);
-      const bend = (rnd() - 0.5) * 0.5;
-      g.quadraticCurveTo(x0 + Math.cos(ang + bend) * len * 0.5, y0 + Math.sin(ang + bend) * len * 0.5, x0 + Math.cos(ang) * len, y0 + Math.sin(ang) * len);
-      g.stroke();
+  const n = 512, K = 2;
+  const sheet = () => { const cv = canvas(n * K, n * K), g = cv.getContext('2d'); g.scale(K, K); g.fillStyle = '#808080'; g.fillRect(0, 0, n, n); g.lineCap = 'round'; return [cv, g]; };
+  const laid = (seed, turn) => {
+    const [cv, g] = sheet(), rnd = rng(seed);
+    const streak = (x, y, len, ang, w, v, a) => {
+      for (const ox of [-n, 0, n]) for (const oy of [-n, 0, n]) {
+        const x0 = x + ox, y0 = y + oy;
+        if (x0 < -120 || x0 > n + 120 || y0 < -120 || y0 > n + 120) continue;
+        g.strokeStyle = rgb(v, v, v, a); g.lineWidth = w;
+        g.beginPath(); g.moveTo(x0, y0);
+        const bend = (rnd() - 0.5) * 0.5;
+        g.quadraticCurveTo(x0 + Math.cos(ang + bend) * len * 0.5, y0 + Math.sin(ang + bend) * len * 0.5, x0 + Math.cos(ang) * len, y0 + Math.sin(ang) * len);
+        g.stroke();
+      }
+    };
+    for (let i = 0; i < 1500; i++) {            // broad washes
+      const ang = turn + (rnd() - 0.5) * 0.9 + (rnd() < 0.2 ? Math.PI / 2 : 0);
+      streak(rnd() * n, rnd() * n, 40 + rnd() * 90, ang, 5 + rnd() * 12, rnd() < 0.5 ? 60 + rnd() * 40 : 160 + rnd() * 50, 0.05 + rnd() * 0.06);
     }
+    for (let i = 0; i < 3800; i++) {            // the bristles
+      const ang = turn + (rnd() - 0.5) * 0.7 + (rnd() < 0.15 ? Math.PI / 2 : 0);
+      streak(rnd() * n, rnd() * n, 14 + rnd() * 60, ang, 0.8 + rnd() * 2.2, rnd() < 0.5 ? 20 + rnd() * 60 : 180 + rnd() * 70, 0.06 + rnd() * 0.12);
+    }
+    return cv;
   };
-  for (let i = 0; i < 1500; i++) {            // broad washes
-    const ang = (rnd() - 0.5) * 0.9 + (rnd() < 0.2 ? Math.PI / 2 : 0);
-    streak(rnd() * n, rnd() * n, 40 + rnd() * 90, ang, 5 + rnd() * 12, rnd() < 0.5 ? 60 + rnd() * 40 : 160 + rnd() * 50, 0.05 + rnd() * 0.06);
-  }
-  for (let i = 0; i < 3800; i++) {            // the bristles
-    const ang = (rnd() - 0.5) * 0.7 + (rnd() < 0.15 ? Math.PI / 2 : 0);
-    streak(rnd() * n, rnd() * n, 14 + rnd() * 60, ang, 0.8 + rnd() * 2.2, rnd() < 0.5 ? 20 + rnd() * 60 : 180 + rnd() * 70, 0.06 + rnd() * 0.12);
-  }
+  const pooled = () => {
+    const [cv, g] = sheet(), rnd = rng(29);
+    for (let i = 0; i < 150; i++) {
+      const x = rnd() * n, y = rnd() * n, r = 26 + rnd() * 100, v = rnd() < 0.5 ? 30 : 225, a = 0.1 + rnd() * 0.14;
+      for (const ox of [-n, 0, n]) for (const oy of [-n, 0, n]) {
+        if (x + ox < -r || x + ox > n + r || y + oy < -r || y + oy > n + r) continue;
+        const gr = g.createRadialGradient(x + ox, y + oy, r * 0.15, x + ox, y + oy, r); gr.addColorStop(0, rgb(v, v, v, a)); gr.addColorStop(1, rgb(v, v, v, 0));
+        g.fillStyle = gr; g.beginPath(); g.ellipse(x + ox, y + oy, r, r * (0.5 + rnd() * 0.5), rnd() * 3, 0, TAU); g.fill();
+      }
+    }
+    return cv;
+  };
+  const cv = laid(11, 0), g = cv.getContext('2d'), im = g.getImageData(0, 0, cv.width, cv.height), d = im.data;
+  const d2 = laid(17, 1.1).getContext('2d').getImageData(0, 0, cv.width, cv.height).data, d3 = pooled().getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+  for (let i = 0; i < d.length; i += 4) { d[i + 1] = d2[i]; d[i + 2] = d3[i]; }
+  g.putImageData(im, 0, 0);
   return plainTexture(cv, { repeat: true, data: true });
+}
+
+// ------------------------------------------------------------------------------------------------ weathering
+// What a clean drawing of wood or bark lacks is everything that happened to it afterwards. This lays that over a
+// finished sheet: the wash pooled and thin in patches, a slow drift between warm and cool, the fine tooth of the
+// surface running with the grain, and pits. It closes on itself down the sheet, as the sheets do.
+let _noise = null;
+function noiseTile() {
+  if (_noise) return _noise;
+  const n = 256, t = new Float32Array(n * n), rnd = rng(77);
+  for (const [cells, amp] of [[4, 1], [8, 0.6], [16, 0.36], [32, 0.2], [64, 0.12]]) {
+    const lat = new Float32Array(cells * cells); for (let i = 0; i < lat.length; i++) lat[i] = rnd();
+    const k = n / cells;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const fx = x / k, fy = y / k, x0 = Math.floor(fx), y0 = Math.floor(fy), ux = fx - x0, uy = fy - y0, sx = ux * ux * (3 - 2 * ux), sy = uy * uy * (3 - 2 * uy);
+      const x1 = (x0 + 1) % cells, y1 = (y0 + 1) % cells, a = lat[y0 * cells + x0], b = lat[y0 * cells + x1], c = lat[y1 * cells + x0], e = lat[y1 * cells + x1];
+      t[y * n + x] += amp * (a + (b - a) * sx + (c - a) * sy + (a - b - c + e) * sx * sy);
+    }
+  }
+  let lo = 1e9, hi = -1e9; for (let i = 0; i < t.length; i++) { lo = Math.min(lo, t[i]); hi = Math.max(hi, t[i]); }
+  for (let i = 0; i < t.length; i++) t[i] = (t[i] - lo) / (hi - lo);
+  return (_noise = t);
+}
+function weather(cv, o = {}) {
+  const { pool = 0.16, drift = 0.07, tooth = 0.07, pits = 0.16, along = 6 } = o;
+  const N = noiseTile(), g = cv.getContext('2d'), w = cv.width, h = cv.height, im = g.getImageData(0, 0, w, h), d = im.data;
+  const at = (u, v) => {                                             // the tile, smoothly, anywhere
+    const fx = (u - Math.floor(u)) * 256, fy = (v - Math.floor(v)) * 256, x0 = fx | 0, y0 = fy | 0, x1 = (x0 + 1) & 255, y1 = (y0 + 1) & 255, ux = fx - x0, uy = fy - y0;
+    const a = N[y0 * 256 + x0], b = N[y0 * 256 + x1], c = N[y1 * 256 + x0], e = N[y1 * 256 + x1];
+    return a + (b - a) * ux + (c - a) * uy + (a - b - c + e) * ux * uy;
+  };
+  for (let y = 0; y < h; y++) {
+    const v = y / h;
+    for (let x = 0; x < w; x++) {
+      const u = x / h, i = (y * w + x) * 4;
+      const a = at(u * 1 + 0.13, v * 1) - 0.5, b = at(u * 5 + 0.61, v * 5) - 0.5, c = at(u * 46, v * along) - 0.5;
+      const pit = N[((y * 2) & 255) * 256 + ((x * 9) & 255)];                 // (drawn out along the grain: checks, not pocks)
+      let m = 1 + (a * 1.3 + b * 0.9) * 2 * pool + c * 2 * tooth;
+      if (pit > 0.84) m *= 1 - pits * (pit - 0.84) / 0.16;
+      const t = (a + b * 0.5) * drift * 2;
+      d[i] = Math.min(255, d[i] * m * (1 + t)); d[i + 1] = Math.min(255, d[i + 1] * m); d[i + 2] = Math.min(255, d[i + 2] * m * (1 - t * 1.3));
+    }
+  }
+  g.putImageData(im, 0, 0);
 }
 
 // ------------------------------------------------------------------------------------------------ water and air
@@ -396,6 +464,7 @@ export function barkSheet() {
       for (let q = 0; q < 3; q++) flake(x + (rnd() - 0.5) * w * 2.6, y + (rnd() - 0.5) * 6, w * 0.9, 1.3, [50, 44, 44], 0.8); }
     for (let k = 0; k < 24; k++) flake(rnd() * W, rnd() * S, 8 + rnd() * 10, 1.6, [246, 244, 236], 0.9);
   });
+  weather(cv, { pool: 0.13, drift: 0.05, tooth: 0.09, pits: 0.24, along: 9 });
   const t = plainTexture(cv, { repeat: true });
   t.wrapS = THREE.ClampToEdgeWrapping;
   return (barkSheet.made = t);
@@ -476,7 +545,7 @@ export function fellLine(seed) {
  * as with the barks; the sheet has room for eight.
  */
 const WOOD_SLOT = (i) => [i / 8 + 0.003, (i + 1) / 8 - 0.003];
-export const WOOD_U = { tar: WOOD_SLOT(0), grey: WOOD_SLOT(1), pale: WOOD_SLOT(2), carved: WOOD_SLOT(3), shingle: WOOD_SLOT(4) };
+export const WOOD_U = { tar: WOOD_SLOT(0), grey: WOOD_SLOT(1), pale: WOOD_SLOT(2), carved: WOOD_SLOT(3), shingle: WOOD_SLOT(4), strake: WOOD_SLOT(5) };
 export function woodSheet() {
   if (woodSheet.made) return woodSheet.made;
   const S = 512, W = 128, cv = canvas(W * 16, S * 2), g = cv.getContext('2d'); g.scale(2, 2); g.lineCap = 'round';
@@ -486,7 +555,7 @@ export function woodSheet() {
     for (const o of [-S, 0, S]) { g.strokeStyle = rgb(c[0], c[1], c[2], a); g.lineWidth = w; g.beginPath(); let xx = x; const r2 = rng(Math.floor(x * 91 + y0 * 7 + 3)); g.moveTo(xx, y0 + o);
       for (let t = 12; t <= len; t += 12) { xx += (r2() - 0.5) * wob; g.lineTo(xx, y0 + o + t); } g.stroke(); }
   };
-  const knot = (x, y, r, dark, lightc) => { for (const o of [-S, 0, S]) { for (let k = 4; k >= 0; k--) { g.strokeStyle = rgb(...(k % 2 ? lightc : dark), 0.7); g.lineWidth = 1.3; g.beginPath(); g.ellipse(x, y + o, r * (0.3 + k * 0.32), r * (0.5 + k * 0.6), 0, 0, TAU); g.stroke(); } g.fillStyle = rgb(dark[0] * 0.6, dark[1] * 0.6, dark[2] * 0.6, 0.9); g.beginPath(); g.ellipse(x, y + o, r * 0.3, r * 0.45, 0, 0, TAU); g.fill(); } };
+  const knot = (x, y, r, dark, lightc) => { const lean = (hash1(x * 3.1 + y) - 0.5) * 0.9, rings = 3; for (const o of [-S, 0, S]) { for (let k = rings; k >= 0; k--) { g.strokeStyle = rgb(...(k % 2 ? lightc : dark), 0.34); g.lineWidth = 1.0; g.beginPath(); g.ellipse(x, y + o, r * (0.3 + k * 0.3), r * (0.6 + k * 0.85), lean, 0, TAU); g.stroke(); } g.fillStyle = rgb(dark[0] * 0.6, dark[1] * 0.6, dark[2] * 0.6, 0.8); g.beginPath(); g.ellipse(x, y + o, r * 0.24, r * 0.4, lean, 0, TAU); g.fill(); } };
   // tarred planking: near black-brown, the tar pooled dark in the grain and worn to red wood on the high places
   strip(0, [84, 62, 48], (rnd) => {
     for (let k = 0; k < 46; k++) grain(rnd() * W, 2 + rnd() * 5, rnd() < 0.6 ? [62, 44, 36] : [104, 76, 56], 0.22 + rnd() * 0.2, 1.6, rnd);
@@ -541,6 +610,25 @@ export function woodSheet() {
       if (rnd() < 0.2) { g.fillStyle = rgb(92, 112, 58, 0.5); g.beginPath(); g.ellipse(x + w * (0.3 + rnd() * 0.4), y + R * (0.3 + rnd() * 0.5), 3 + rnd() * 5, 4 + rnd() * 7, 0, 0, TAU); g.fill(); }
     }
   });
+  // a strake of a clinker-built boat: tarred plank, a row of iron rivets on their roves along the edge that laps the
+  // strake below, that edge worn pale, and the other edge in the shadow of the strake above
+  strip(5, [86, 63, 48], (rnd) => {
+    for (let k = 0; k < 46; k++) grain(rnd() * W, 2 + rnd() * 5, rnd() < 0.6 ? [62, 44, 36] : [108, 80, 58], 0.22 + rnd() * 0.2, 1.6, rnd);
+    for (let k = 0; k < 60; k++) grain(rnd() * W, 0.8, [44, 30, 26], 0.5, 1.2, rnd, rnd() * S, 60 + rnd() * 200);
+    for (let k = 0; k < 14; k++) grain(rnd() * W, 1.0, [136, 102, 72], 0.3, 1.0, rnd, rnd() * S, 30 + rnd() * 90);
+    knot(30 + rnd() * (W - 60), rnd() * S, 5 + rnd() * 3, [46, 32, 26], [100, 74, 54]);
+    let sh = g.createLinearGradient(W - 26, 0, W, 0); sh.addColorStop(0, rgb(14, 9, 8, 0)); sh.addColorStop(1, rgb(14, 9, 8, 0.8)); g.fillStyle = sh; g.fillRect(W - 26, 0, 26, S);
+    sh = g.createLinearGradient(0, 0, 9, 0); sh.addColorStop(0, rgb(190, 150, 104, 0.75)); sh.addColorStop(1, rgb(190, 150, 104, 0)); g.fillStyle = sh; g.fillRect(0, 0, 9, S);
+    for (let y = 16; y < S; y += 64) {
+      const x = 17 + (rnd() - 0.5) * 2, yy = y + (rnd() - 0.5) * 5;
+      g.fillStyle = rgb(120, 62, 30, 0.3); g.beginPath(); g.ellipse(x, yy, 8, 6, 0, 0, TAU); g.fill();                                 // rust in the wood about it
+      g.fillStyle = rgb(18, 14, 13, 0.75); g.beginPath(); g.moveTo(x, yy - 5.4); g.lineTo(x + 5, yy + 0.6); g.lineTo(x, yy + 6.4); g.lineTo(x - 5, yy + 0.6); g.closePath(); g.fill();      // the rove's shadow
+      g.fillStyle = rgb(62, 56, 56, 1); g.beginPath(); g.moveTo(x, yy - 5); g.lineTo(x + 4.6, yy); g.lineTo(x, yy + 5); g.lineTo(x - 4.6, yy); g.closePath(); g.fill();                    // the rove, a diamond of iron
+      g.fillStyle = rgb(30, 26, 27, 1); g.beginPath(); g.arc(x, yy, 2.1, 0, TAU); g.fill();                                           // the rivet's clenched end
+      g.fillStyle = rgb(150, 146, 150, 0.8); g.beginPath(); g.arc(x - 0.6, yy - 0.8, 0.8, 0, TAU); g.fill();
+    }
+  });
+  weather(cv);
   const t = plainTexture(cv, { repeat: true });
   t.wrapS = THREE.ClampToEdgeWrapping;
   return (woodSheet.made = t);

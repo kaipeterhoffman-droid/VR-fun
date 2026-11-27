@@ -168,13 +168,13 @@ const FRAG = /* glsl */`
   uniform sampler2D tBrush, tMap;
   varying vec3 vWPos; varying vec3 vN; varying vec3 vView; varying vec2 vUv; varying vec3 vCol;
   // the shared dry-brush strokes, laid from above and from the side (two looks at the picture, no seams on round things)
-  float strokes(vec3 p, vec3 n) {
+  vec3 strokes(vec3 p, vec3 n) {
     float up = smoothstep(0.35, 0.8, abs(n.y));
     vec2 top = p.xz * uBrushScale, side = vec2(p.x + p.z, p.y * 1.3) * uBrushScale;
-    float a = texture2D(tBrush, top).r, b = texture2D(tBrush, side).r;
+    vec3 m = mix(texture2D(tBrush, side).rgb, texture2D(tBrush, top).rgb, up) - 0.5;
     // within arm's reach and a little beyond, the same brush again four times finer: the hairs inside the stroke
     float fine = (texture2D(tBrush, (up > 0.5 ? top : side) * 4.3 + 0.37).r - 0.5) * (1.0 - smoothstep(1.5, 9.0, length(vView)));
-    return clamp((mix(b, a, up) - 0.5) * 4.0 + fine * 2.2, -1.0, 1.0);
+    return vec3(clamp(m.r * 4.0 + fine * 2.2, -1.0, 1.0), clamp(m.g * 4.0, -1.0, 1.0), clamp(m.b * 3.0, -1.0, 1.0));      // light and dark; warm and cool; pooled and thin
   }
   void main() {
     vec3 N = normalize(vN);
@@ -192,8 +192,9 @@ const FRAG = /* glsl */`
     #endif
     float stroke = 0.0;
     #ifdef BRUSH
-      stroke = strokes(vWPos, N);
-      albedo *= 1.0 + stroke * uBrush;
+      vec3 laid = strokes(vWPos, N); stroke = laid.x;
+      albedo *= (1.0 + (stroke + laid.z * 1.1) * uBrush) * (1.0 + vec3(0.4, 0.05, -0.42) * laid.y * uBrush);
+      N = normalize(N + (laid - vec3(0.0, 0.0, laid.z * 0.5)) * (uBrush * 0.55));      // and the paint has a body: each stroke leans its own way to the light
     #endif
     #ifdef TOP
       // what faces the sky is grown over (moss, needles, snow of lichen): by its lean, broken by the brush

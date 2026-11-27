@@ -35,7 +35,7 @@ export function beam(b, A, B, wide, thick, upHint, U, c = WHITE, vScale = 1.3) {
  */
 export function buildHull(o) {
   const { L, beam: BM, draft, sheerMid, sheerEnd, floorY = 0.035, N = 18, K = 5, lap = 0.012, skin = 0.014, ribs = 8,
-    out = WOOD_U.tar, inn = WOOD_U.tar, tintOut = WHITE, tintIn = WHITE, floor = true, inside = true, grain = 1.3 } = o;
+    out = WOOD_U.strake, inn = WOOD_U.strake, tintOut = WHITE, tintIn = WHITE, floor = true, inside = true, grain = 1.3 } = o;
   const b = new Builder(2400);
   const half = (t) => BM / 2 * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(t), 2.3)), 0.72);
   const keelY = (t) => -draft * (1 - Math.pow(Math.abs(t), 3));
@@ -123,7 +123,7 @@ export function stemPost(b, z0, dir, y0, y1, rise, R0, r, turns, U, tint) {
  * seats: [z, ...], sheerAt(z) }. `zc` is where her middle lies ahead of the paddler, who sits at the origin.
  */
 export function buildCanoe(zc = -0.5) {
-  const lines = buildHull({ L: 4.3, beam: 0.92, draft: 0.11, sheerMid: 0.29, sheerEnd: 0.42, tintOut: [0.9, 0.84, 0.8], tintIn: [1.0, 0.94, 0.86], inn: WOOD_U.tar });
+  const lines = buildHull({ L: 4.3, beam: 0.92, draft: 0.11, sheerMid: 0.29, sheerEnd: 0.42, tintOut: [0.9, 0.84, 0.8], tintIn: [1.0, 0.94, 0.86] });
   const { L, half, sheerY, inner } = lines, b = lines.b, zOf = (t) => t * L / 2;
   // the gunwales: a pale worn rail along each sheer
   for (const side of [-1, 1]) {
