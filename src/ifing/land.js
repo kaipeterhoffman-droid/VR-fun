@@ -2,14 +2,11 @@
 import * as THREE from 'three';
 import { Builder, col, mixCol } from './build.js';
 import { makePaint } from './paint.js';
-import { river, landHeight, wooded, LENGTH } from './river.js';
+import { river, landShape, landHeight, wooded, LENGTH, BANK_OUT as OUT, BANK_ROW as ROW } from './river.js';
 import { fbm2, noise2, smooth, clamp } from './noise.js';
-import { treeWall } from './art.js';
+import { treeWall, groundSheet } from './art.js';
 import { SECTION } from './world.js';
 
-// metres outside the water's edge at which the bank is sampled: close together by the water, where it is looked at
-const OUT = [0, 0.35, 0.8, 1.5, 2.6, 4.2, 6.5, 9.5, 13.5, 19, 26, 35, 46, 62];
-const ROW = 2;
 
 // What the ground is made of, along the river: [s, at the waterline, the turf, the forest floor].
 const GROUND = [
@@ -25,13 +22,15 @@ function groundAt(s) {
   return [mixCol(A[1], B[1], t), mixCol(A[2], B[2], t), mixCol(A[3], B[3], t)];
 }
 
+const TILE = 2.3;                                                // metres of ground to one repeat of the litter (art.js groundSheet)
+
 /** Where the far wall of forest stands, metres behind the water's edge: close in the deep wood, far back round the open water. */
 export function wallOut(s) { const w = wooded(s); return 30 + (1 - smooth(0.25, 0.8, w)) * 44; }
 
 /** `gaps`: where the far wall is left out, because something bigger than a wood stands there: [{ s0, s1, side }]. */
 export function buildLand(world, gaps = []) {
   const gapAt = (s, side) => { let k = 1; for (const g of gaps) if (g.side === side) k = Math.min(k, 1 - smooth(g.s0 - 6, g.s0 + 6, s) * (1 - smooth(g.s1 - 6, g.s1 + 6, s))); return k; };
-  const landMat = makePaint({ brush: 0.3, brushScale: 0.21, wet: 0.32 });
+  const landMat = makePaint({ map: groundSheet(), brush: 0.3, brushScale: 0.21, wet: 0.32 });
   const wallTex = treeWall(3, 'spruce');
   const wallMat = makePaint({ map: wallTex, cutout: true, alphaTest: 0.5, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 1, fogScale: 0.7 });
   const pt = [0, 0];
@@ -40,26 +39,27 @@ export function buildLand(world, gaps = []) {
     for (const side of [-1, 1]) {
       const base = b.nv;
       for (let r = 0; r < rows; r++) {
-        const s = sec.s0 + r * ROW, hw = river.halfWidth(s), [mud, turf, floor] = groundAt(s);
+        const s = sec.s0 + r * ROW, hw = river.halfWidth(s), [mud, turf, floor] = groundAt(s), wd = wooded(s);
         for (let c = 0; c < OUT.length; c++) {
           const out = OUT[c];
           river.point(s, side * (hw + out), pt);
-          const y = out === 0 ? -0.05 : landHeight(s, side, out);
+          const y = out === 0 ? -0.05 : landShape(s, side, out);
           const patch = smooth(0.38, 0.62, fbm2(pt[0] * 0.09 + 11, pt[1] * 0.09 + 5, 3));
           const dry = smooth(0.15, 1.5, out + (noise2(pt[0] * 0.7, pt[1] * 0.7) - 0.5) * 0.8);
           let cc = mixCol(mud, mixCol(turf, floor, patch), dry);
           const v = 0.78 + 0.44 * fbm2(pt[0] * 0.31, pt[1] * 0.31, 2);
-          cc = [cc[0] * v, cc[1] * v, cc[2] * v];
-          b.vert(pt[0], y, pt[1], 0, 1, 0, cc);
+          const dim = v * (1 - 0.5 * wd * smooth(1.0, 5.5, out));                 // under the trees the ground has only what light gets through
+          cc = [cc[0] * dim, cc[1] * dim, cc[2] * dim];
+          b.vert(pt[0], y, pt[1], 0, 1, 0, cc, pt[0] / TILE, pt[1] / TILE);
         }
       }
       for (let r = 0; r < rows - 1; r++) for (let c = 0; c < OUT.length - 1; c++) {
         const a = base + r * OUT.length + c, d = a + OUT.length;
-        if (side > 0) b.quad(a, d, d + 1, a + 1); else b.quad(a, a + 1, d + 1, d);
+        if (side > 0) b.quad(a, a + 1, d + 1, d); else b.quad(a, d, d + 1, a + 1);      // wound so that the ground faces the sky
       }
     }
     b.smoothNormals();
-    const land = new THREE.Mesh(b.build({ uv: false, bend: false }), landMat); land.name = 'land';
+    const land = new THREE.Mesh(b.build({ bend: false }), landMat); land.name = 'land';
     world.add(land, sec.s0 + 1, true);
 
     // the far wood: two painted walls of trees behind the last real ones, the farther one taller and paler

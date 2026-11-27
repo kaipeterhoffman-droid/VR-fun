@@ -57,6 +57,7 @@ export function buildForest(world, { clearings = [], lineup = false } = {}) {
   for (const sec of world.sections) {
     const hi = new Builder(20000), lo = new Builder(4000), loCut = new Builder(12000), cut = new Builder(30000), edge = new Builder(600), bark = new Builder(6000);
     const rnd = rng(1000 + sec.index * 17);
+    const rnd2 = rng(5000 + sec.index * 31);                        // (its own dice for what was planted later, so that the older wood stands where it stood)
     /** place a model at (s, side, out): turned by yaw, scaled, leaning `lean` radians toward the water */
     const place = (s, side, out, yaw, scale, lean = 0, sink = 0.12) => {
       const hw = river.halfWidth(s); river.point(s, side * (hw + out), pt); river.at(Math.min(LENGTH, Math.max(0, s)), here);
@@ -115,6 +116,11 @@ export function buildForest(world, { clearings = [], lineup = false } = {}) {
         const hw = river.halfWidth(s), reedy = fbm2(s * 0.06 + side * 31, 4.2, 2), still = fbm2(s * 0.035 + side * 17, 9.1, 2);
         const low = landHeight(s, side, 2.5) < 1.5;
         if (low && reedy > 0.56 && r1 < 0.8) edge.add(reeds[Math.floor(r2 * 3)].cut, place(s, side, -0.1 - r3 * 1.3, r4 * TAU, 0.8 + r2 * 0.5, 0, 0), s > 600 && s < 810 ? [0.9, 0.68, 0.3] : [0.34, 0.38, 0.34]);
+        // sedge along the very edge, in runs with gaps between: the waterline is never left bare for long
+        if (fbm2(s * 0.13 + side * 5.3, 1.7, 2) > 0.44) for (let q = 0; q < 2; q++) {
+          const a1 = rnd2(), a2 = rnd2(), a3 = rnd2(), a4 = rnd2();
+          if (a1 < 0.62) edge.add(grass[Math.floor(a2 * 3)].cut, place(s + a3 * 0.8, side, -0.15 + a4 * 0.75, a2 * TAU, 0.55 + a3 * 0.75, 0, 0.04), s > 600 && s < 810 ? [0.95, 0.74, 0.28] : s > 380 && s < 590 ? [0.42, 0.46, 0.5] : [0.3, 0.36, 0.3]);
+        }
         if (r1 < 0.045) hi.add(boulders[Math.floor(r2 * 5)].solid, place(s, side, -0.2 - r3 * Math.min(2.2, hw * 0.25), r4 * TAU, 0.3 + r2 * 0.7, 0, 0.2), s > 110 && s < 360 ? DIM : s > 620 && s < 800 ? GILT : null);
         if (still > 0.6 && s > 60 && s < 600 && hw > 5.5) for (let q = 0; q < 2; q++) {
           const d = -0.7 - rnd() * Math.min(4.5, hw * 0.4), bl = rnd() < 0.1;

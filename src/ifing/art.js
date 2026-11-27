@@ -132,6 +132,62 @@ function weather(cv, o = {}) {
   g.putImageData(im, 0, 0);
 }
 
+// ------------------------------------------------------------------------------------------------ the ground
+/**
+ * What lies on the ground, to be multiplied into the bank's own colour: needles and small dead twigs lying every way,
+ * fallen leaves each with its shadow, sticks, stones, patches of moss and of bare earth. A little over two metres of it,
+ * and it repeats without a seam.
+ */
+export function groundSheet() {
+  if (groundSheet.made) return groundSheet.made;
+  const S = 512, cv = canvas(S, S), g = cv.getContext('2d'), TAU = Math.PI * 2;
+  let seed = 9173; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  g.fillStyle = rgb(190, 190, 190); g.fillRect(0, 0, S, S);
+  // every mark is laid wherever it shows, so that what runs off one edge comes in at the other
+  const wrap = (x, y, r, fn) => { for (let ox = -S; ox <= S; ox += S) for (let oy = -S; oy <= S; oy += S) if (x + ox > -r && x + ox < S + r && y + oy > -r && y + oy < S + r) fn(x + ox, y + oy); };
+  for (let i = 0; i < 90; i++) {                                      // moss, and bare earth: soft patches a hand or two across
+    const x = rnd() * S, y = rnd() * S, r = 18 + rnd() * 46, c = rnd() < 0.5 ? '212,238,192' : '92,80,72';
+    wrap(x, y, r, (px, py) => { const gr = g.createRadialGradient(px, py, 0, px, py, r); gr.addColorStop(0, `rgba(${c},0.5)`); gr.addColorStop(1, `rgba(${c},0)`); g.fillStyle = gr; g.fillRect(px - r, py - r, r * 2, r * 2); });
+  }
+  g.lineCap = 'round';
+  for (let i = 0; i < 5600; i++) {                                    // needles and twigs
+    const x = rnd() * S, y = rnd() * S, a = rnd() * Math.PI, l = 2 + rnd() * 5, v = rnd(), dx = Math.cos(a) * l, dy = Math.sin(a) * l;
+    g.strokeStyle = v < 0.45 ? rgb(66, 54, 46, 0.45 + rnd() * 0.3) : v < 0.86 ? rgb(246, 234, 206, 0.4 + rnd() * 0.35) : rgb(236, 182, 122, 0.6);
+    g.lineWidth = 0.8 + rnd() * 0.7;
+    wrap(x, y, l + 1, (px, py) => { g.beginPath(); g.moveTo(px - dx, py - dy); g.lineTo(px + dx, py + dy); g.stroke(); });
+  }
+  for (let i = 0; i < 26; i++) {                                      // sticks
+    const x = rnd() * S, y = rnd() * S, a = rnd() * TAU, l = 14 + rnd() * 30, k = (rnd() - 0.5) * 0.5;
+    wrap(x, y, l + 4, (px, py) => {
+      for (const [c, w, o] of [[rgb(30, 26, 24, 0.5), 3.2, 1.2], [rgb(120, 104, 90, 0.9), 2.2, 0], [rgb(226, 214, 196, 0.7), 0.8, -0.5]]) {
+        g.strokeStyle = c; g.lineWidth = w; g.beginPath(); g.moveTo(px - Math.cos(a) * l + o, py - Math.sin(a) * l + o); g.quadraticCurveTo(px + Math.cos(a + 1.57) * l * k + o, py + Math.sin(a + 1.57) * l * k + o, px + Math.cos(a) * l + o, py + Math.sin(a) * l + o); g.stroke();
+      }
+    });
+  }
+  for (let i = 0; i < 460; i++) {                                     // fallen leaves, each with its shadow under one edge
+    const x = rnd() * S, y = rnd() * S, a = rnd() * TAU, l = 3.2 + rnd() * 4.6, w = l * (0.42 + rnd() * 0.25), v = rnd();
+    wrap(x, y, l + 3, (px, py) => {
+      g.save(); g.translate(px, py); g.rotate(a);
+      g.fillStyle = rgb(36, 30, 28, 0.5); g.beginPath(); g.ellipse(0.9, 1.1, l, w, 0, 0, TAU); g.fill();
+      g.fillStyle = v < 0.6 ? rgb(255, 247, 216, 0.88) : v < 0.85 ? rgb(252, 214, 158, 0.88) : rgb(208, 228, 198, 0.82); g.beginPath(); g.ellipse(0, 0, l, w, 0, 0, TAU); g.fill();
+      g.strokeStyle = rgb(124, 104, 86, 0.55); g.lineWidth = 0.6; g.beginPath(); g.moveTo(-l, 0); g.lineTo(l, 0); g.stroke();
+      g.restore();
+    });
+  }
+  for (let i = 0; i < 70; i++) {                                      // stones, with the light on their shoulders
+    const x = rnd() * S, y = rnd() * S, r = 2.5 + rnd() * 6, sq = 0.6 + rnd() * 0.35, a = rnd() * TAU;
+    wrap(x, y, r + 3, (px, py) => {
+      g.save(); g.translate(px, py); g.rotate(a);
+      g.fillStyle = rgb(26, 24, 26, 0.55); g.beginPath(); g.ellipse(1, 1.4, r * 1.08, r * sq * 1.08, 0, 0, TAU); g.fill();
+      g.fillStyle = rgb(150, 152, 158, 0.95); g.beginPath(); g.ellipse(0, 0, r, r * sq, 0, 0, TAU); g.fill();
+      g.fillStyle = rgb(232, 234, 238, 0.7); g.beginPath(); g.ellipse(-r * 0.2, -r * sq * 0.25, r * 0.6, r * sq * 0.5, 0, 0, TAU); g.fill();
+      g.restore();
+    });
+  }
+  weather(cv, { pool: 0.2, drift: 0.1, tooth: 0.05, pits: 0, along: 46 });
+  return (groundSheet.made = plainTexture(cv, { repeat: true }));
+}
+
 // ------------------------------------------------------------------------------------------------ water and air
 /** A wave field that repeats: rg = its slope, b = its height. Built from waves that fit the tile a whole number of times. */
 export function waveTile() {
