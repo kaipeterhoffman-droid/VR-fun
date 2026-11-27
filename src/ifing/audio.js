@@ -30,7 +30,7 @@ export const K = {
   lap: 0.11, glug: 0.16, bow: 0.22, wash: 0.2,
   swish: 0.5, oarBubbles: 0.22, splash: 0.34, thunk: 0.1, drip: 0.1, bump: 0.5,
   tone: 0.022, lyre: 0.1, owl: 0.1, touch: 0.07,
-  fire: 1.15, breath: 1.3, gold: 0.6, goldBed: 0.14, ship: 0.38, pluck: 0.26,
+  fire: 1.15, breath: 1.3, gold: 0.6, goldBed: 0.14, tree: 0.1, ship: 0.38, pluck: 0.26,
   gust: 0.32, plunge: 0.6, drop: 0.22, groan: 0.5, horn: 0.14, croak: 0.15, fish: 0.2, launch: 0.3, wing: 0.4,
 };
 /** The notes a lyre may pick, as speeds of the one string that was made (which is D): cold fifths for the mere, and the well's own. */
@@ -252,6 +252,11 @@ const VOICES = {
   gold(A, v) {
     const p = A.place(v.pos, A.world.in), g = A.G(0, p), s = A.loop('goldL', g), g2 = A.G(0, A.bed.in), s2 = A.loop('goldR', g2, 1.06, 2);
     return { tick: (k, time, d, gust) => { const w = 0.45 + 0.55 * gust; aim(g.gain, K.gold * k * w, 0.5); aim(g2.gain, K.goldBed * (1 - smooth(v.reach * 0.1, v.reach * 0.6, d)) * w, 0.5); }, end: () => { s.stop(); s2.stop(); p.disconnect(); g2.disconnect(); } };
+  },
+  /** The tree over the well: the same leaves as the grove's, an octave down and a long way up. */
+  tree(A, v) {
+    const g = A.G(0, A.bed.in), s = A.loop('goldL', g, 0.5, 3), g2 = A.G(0, A.bed.in), s2 = A.loop('goldR', g2, 0.53, 7);
+    return { tick: (k, time, d, gust) => { const w = (0.6 + 0.4 * gust) * (1 - smooth(v.reach * 0.35, v.reach, d)); aim(g.gain, K.tree * w, 0.8); aim(g2.gain, K.tree * w, 0.8); }, end: () => { s.stop(); s2.stop(); g.disconnect(); g2.disconnect(); } };
   },
   /** The ship the mere keeps: her crew at the oars, heard as if through the water. */
   ship(A, v) {
