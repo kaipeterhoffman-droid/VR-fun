@@ -30,7 +30,7 @@ export function wallOut(s) { const w = wooded(s); return 30 + (1 - smooth(0.25, 
 /** `gaps`: where the far wall is left out, because something bigger than a wood stands there: [{ s0, s1, side }]. */
 export function buildLand(world, gaps = []) {
   const gapAt = (s, side) => { let k = 1; for (const g of gaps) if (g.side === side) k = Math.min(k, 1 - smooth(g.s0 - 6, g.s0 + 6, s) * (1 - smooth(g.s1 - 6, g.s1 + 6, s))); return k; };
-  const landMat = makePaint({ map: groundSheet(), brush: 0.3, brushScale: 0.21, wet: 0.32 });
+  const landMat = makePaint({ map: groundSheet(), brush: 0.3, brushScale: 0.21, wet: 0.32, canopy: true });
   const wallTex = treeWall(3, 'spruce');
   const wallMat = makePaint({ map: wallTex, cutout: true, alphaTest: 0.5, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 1, fogScale: 0.7 });
   const pt = [0, 0];
