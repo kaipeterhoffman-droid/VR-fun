@@ -31,6 +31,7 @@ export const shared = {
   uSkyLight: { value: C('#1f3d66') }, uGroundLight: { value: C('#0a1420') }, uLightGain: { value: 3 },
   uLanternPos: { value: new THREE.Vector3(0, -100, 0) }, uLanternColor: { value: C('#000000') }, uLanternRadius: { value: 9 },
   uLights: { value: Array.from({ length: MAX_LIGHTS }, () => new THREE.Vector4(0, -1000, 0, 1)) },
+  uLightGlint: { value: new THREE.Vector4(1, 1, 1, 1) },                                   // whether the water shows each of them as a flame (a light with no lamp to it must not)
   uLightColors: { value: Array.from({ length: MAX_LIGHTS }, () => C('#000000')) },
   uWind: { value: new THREE.Vector4(0.8, 0.6, 1, 1) },               // direction (x, z), strength, speed
   uMirror: { value: new THREE.Vector4(0.22, 1.12, 1, 0) },           // the water's copy: darker by x, richer by y, how far it wavers
@@ -203,8 +204,9 @@ const FRAG = /* glsl */`
   void main() {
     vec3 N = normalize(vN);
     vec3 albedo = uColor * vCol; float alpha = 1.0;
+    bool inner = false;
     #ifdef DOUBLE_SIDED
-      if (!gl_FrontFacing) { N = -N; albedo *= uInside; }
+      if (!gl_FrontFacing) { N = -N; albedo *= uInside; inner = true; }
     #endif
     #ifdef USE_MAP
       vec4 tx = texture2D(tMap, vUv, -0.5); albedo *= tx.rgb; alpha = tx.a;      // (half a level sharper than the mip the screen asks for: the multisampling carries it)
@@ -226,7 +228,12 @@ const FRAG = /* glsl */`
       albedo = mix(albedo, uTopColor * (0.8 + 0.4 * vCol.g), up);
     #endif
     #ifdef WET
-      albedo *= mix(0.42, 1.0, smoothstep(0.0, uWet, vWPos.y + stroke * 0.06));
+      // where a thing stands in the water it is dark with it; and just above that runs the pale line the water left
+      // when it was last higher, thin and broken as such lines are
+      float hw = vWPos.y + stroke * 0.06;
+      albedo *= mix(0.42, 1.0, smoothstep(0.0, uWet, hw));
+      float tide = smoothstep(uWet * 0.86, uWet * 1.04, hw) * (1.0 - smoothstep(uWet * 1.08, uWet * 1.5, hw));
+      albedo += albedo * tide * (0.34 + 0.3 * stroke);
     #endif
     #ifdef VERTEX_LIT
       vec3 c = albedo * (toneLight(N, stroke) + vLight);
@@ -245,6 +252,18 @@ const FRAG = /* glsl */`
     #endif
     #ifdef RIM
       c += uLit * uLightGain * 0.3 * uRim.rgb * pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), uRim.w) * smoothstep(-0.3, 0.6, dot(V, uKeyDir));
+    #endif
+    #ifdef WET
+      // and light is thrown back up off the water onto whatever leans over it: the reach's own light and the lantern's,
+      // moving as the water moves, strongest on what faces down
+      if (!inner && vWPos.y < 2.6 && vWPos.y > -0.05) {                          // (not the inside of a hull: the water cannot see it)
+        vec2 q = vWPos.xz * 0.21 + vec2(vWPos.y * 0.13);
+        float net = texture2D(tBrush, q + vec2(0.021, 0.013) * uTime).r * texture2D(tBrush, q * 1.31 - vec2(0.017, 0.024) * uTime + 0.41).g;
+        net = smoothstep(0.17, 0.31, net);
+        float under = (1.0 - smoothstep(0.1, 2.6, vWPos.y)) * smoothstep(0.55, -0.35, N.y);
+        vec3 dl = uLanternPos - vec3(vWPos.x, 0.0, vWPos.z); float lan = 1.0 - smoothstep(uLanternRadius * 0.1, uLanternRadius * 0.9, length(dl));
+        c += albedo * (uLit * uLightGain * 0.3 + uSkyLight * 0.6 + uLanternColor * lan * lan * 0.5) * (net * under);
+      }
     #endif
     c += uEmissive;
     #if defined(FRONT) && !defined(VERTEX_LIT)
@@ -350,7 +369,7 @@ export function withColor(geo, hex) {
 // ------------------------------------------------------------------------------------------------ lights
 const _score = [];
 /**
- * The fires and lamps of the river: [{ position: Vector3, color: Color, radius, intensity }]. Each frame the four
+ * The fires and lamps of the river: [{ position: Vector3, color: Color, radius, intensity, glint: true }]. Each frame the four
  * that matter most from where the rider is are given to the paint; one about to drop out fades first.
  */
 export function applyLights(lights, eye) {
@@ -365,6 +384,7 @@ export function applyLights(lights, eye) {
   for (let i = 0; i < MAX_LIGHTS; i++) {
     const l = _score[i], P = shared.uLights.value[i], Cc = shared.uLightColors.value[i];
     if (!l) { P.set(0, -1000, 0, 1); Cc.setRGB(0, 0, 0); continue; }
+    shared.uLightGlint.value.setComponent(i, l.glint === false ? 0 : 1);
     const k = cut > 0 ? Math.min(1, Math.max(0, (l._score - cut) / (0.3 * l._score + 1e-6))) : 1;
     P.set(l.position.x, l.position.y, l.position.z, l.radius);
     Cc.copy(l.color).multiplyScalar(l.intensity * k);

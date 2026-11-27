@@ -75,6 +75,18 @@ export function ico(detail) {
   return (icoCache[detail] = { v, f });
 }
 
+/** A path of [x, y, z, r] drawn through its points as a bent bough is, `sub` steps to each span. */
+export function sweep(pts, sub = 3) {
+  const out = [], n = pts.length, P = (i) => pts[Math.max(0, Math.min(n - 1, i))];
+  for (let i = 0; i < n - 1; i++) for (let k = 0; k < sub; k++) {
+    const t = k / sub, a = P(i - 1), b = P(i), c = P(i + 1), d = P(i + 2), q = [];
+    for (let j = 0; j < 4; j++) q.push(0.5 * (2 * b[j] + (c[j] - a[j]) * t + (2 * a[j] - 5 * b[j] + 4 * c[j] - d[j]) * t * t + (3 * b[j] - a[j] - 3 * c[j] + d[j]) * t * t * t));
+    out.push(q);
+  }
+  out.push(pts[n - 1].slice());
+  return out;
+}
+
 /**
  * A lump: a ball pushed about by noise. Used for boulders, the cushions of a pine, the clouds of a leafy crown.
  * colorAt(nx, ny, nz, wobble) gives each corner its colour; `flat` squashes what lies below the middle.
