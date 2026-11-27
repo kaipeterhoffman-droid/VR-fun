@@ -21,7 +21,7 @@ export function buildStage({ world, glows, water, engine }) {
   };
   const ctx = {
     world, glows, water, engine, mats,
-    clearings: [], obstacles: [], lights: [], ticks: [], planters: [], wallGaps: [],
+    clearings: [], obstacles: [], lights: [], ticks: [], planters: [], wallGaps: [], sounds: [], hits: [],
     /** Put what a builder holds into the world as one drawing, in the section at s (null: always there). */
     mesh(b, mat, s, mirror = true, opts = {}) {
       if (!b.nv) return null;
@@ -30,6 +30,13 @@ export function buildStage({ world, glows, water, engine }) {
       world.add(m, s, mirror);
       return m;
     },
+    /**
+     * Something that stands at `pos` and keeps sounding, to be heard within `reach` metres (src/ifing/audio.js knows
+     * what each kind sounds like). The piece that owns it sets its level, 0..1. awe: the reach's chord opens to it.
+     */
+    voice(kind, pos, reach, awe = false) { const v = { kind, pos, reach, awe, level: 0, node: null }; this.sounds.push(v); return v; },
+    /** Something that happens once, at `pos`. (Nothing is kept if nobody is listening.) */
+    hit(kind, pos, power = 1) { if (this.hits.length < 24) this.hits.push({ kind, x: pos.x, y: pos.y, z: pos.z, power }); },
     /** Runes that give light: a material of their own, whose brightness the piece that owns them turns up and down. */
     litRunes(color) {
       const m = makePaint({ map: runeSheet(), cutout: true, alphaTest: 0.5, brush: 0, color: '#20242c', emissive: color, emissiveIntensity: 1, ...two, inside: 1 });
@@ -42,9 +49,9 @@ export function buildStage({ world, glows, water, engine }) {
   buildVe(ctx);
   buildGlasir(ctx);
   return {
-    clearings: ctx.clearings, obstacles: ctx.obstacles, lights: ctx.lights, ctx,
+    clearings: ctx.clearings, obstacles: ctx.obstacles, lights: ctx.lights, sounds: ctx.sounds, hits: ctx.hits, ctx,
     /** Once the forest stands: the pieces that need its trees (a lone birch, a giant spruce) plant them. */
     plant(forest) { ctx.forest = forest; for (const p of ctx.planters) p(forest); },
-    update(dt, time, boat, look, eye) { for (const t of ctx.ticks) t(dt, time, boat, look, eye); },
+    update(dt, time, boat, look, eye) { ctx.hits.length = 0; for (const t of ctx.ticks) t(dt, time, boat, look, eye); },
   };
 }

@@ -15,6 +15,7 @@ import { Boat, EYE } from './boat.js';
 import { buildStage } from './stage.js';
 import { START } from './naust.js';
 import { river } from './river.js';
+import { Sound } from './audio.js';
 
 const Q = new URLSearchParams(location.search);
 const num = (k, d) => (Q.has(k) ? parseFloat(Q.get(k)) : d);
@@ -31,6 +32,7 @@ async function begin() {
   const water = new Water(renderer); scene.add(water.mesh);
   const glows = new Glows(); scene.add(glows.mesh); world.mirror.add(glows.twin);
   progress(0.1); await breathe();
+  const sound = new Sound({ quiet: Q.has('quiet'), volume: num('vol', 1) }), composed = sound.compose(breathe);      // (every sound is worked out from nothing, meanwhile: src/ifing/sounds.js)
   const lineup = Q.has('lineup');
   const stage = lineup ? null : buildStage({ world, glows, water, engine });
   progress(0.25); await breathe();
@@ -79,12 +81,13 @@ async function begin() {
     glows.update();
     sky.update(dt);
     water.update(renderer, boat.pos.x, boat.pos.y, dt);
+    sound.update(dt, time, boat, look, camera, stage);
     if (engine.frames === 6) window.__ready = true;
   });
   if (Q.has('nomirror')) world.mirrorOn = false;
   if (Q.has('noripple')) water.ripples.ok = false;
   if (Q.has('nowater')) water.mesh.visible = false;
-  window.__ifing = { engine, world, look, water, sky, boat, stage, glows, river };
+  window.__ifing = { engine, world, look, water, sky, boat, stage, glows, river, sound };
 
   // ---- looking about with the mouse, outside the headset
   const dom = renderer.domElement; let drag = null;
@@ -96,12 +99,14 @@ async function begin() {
   });
 
   // ---- the way in
+  await composed;
   progress(1);
   const enter = el('enter'), card = el('card');
   const vr = await engine.vrSupported();
   if (enter) {
     enter.disabled = false; enter.textContent = vr ? 'Enter the river' : 'Begin';
     enter.addEventListener('click', async () => {
+      sound.start();
       if (vr) { try { boat.seat.set = false; await engine.enterVR(Q.has('sharp') ? num('sharp', 1.35) : null, num('fov', 0.5)); } catch (e) { console.warn('could not enter VR', e); } }
       card.classList.add('gone');
     });
