@@ -1,26 +1,34 @@
 // Boat: the canoe on the water, the paddler's seat in her, the lantern at her bow and the paddle that drives her.
 //
-// THE PADDLE is held in both hands, as a real one is: the upper hand on the grip, the lower on the shaft, and the
-// blade goes wherever that puts it. Nothing is scripted. Each frame the blade's own movement through the water is
-// measured, and the water pushes back on it by the square of its speed: pull the blade aft and she goes forward,
-// hold it still in the water and it drags like a rudder, sweep it wide and she turns. A stroke on the right turns
-// her to the left, as it should, and the river's current and her own keel slowly bring her straight again, so a
-// rider who only wants to look can paddle on one side, or not at all, and still come to the well.
+// THE OARS lie one to a side in their keipar (carved hooks on the gunwales), and each is a lever through its hook:
+// the hand has one end, the water the other. Nothing is scripted. A hand closes on an oar with the grip or the
+// trigger and the oar goes wherever that hand puts it; each frame the blade's own movement through the water is
+// measured, and the water pushes back on it by the square of its speed. The rower faces the way she goes, as the
+// fishermen of the North did when they wanted to see their landing: dip the blades and PUSH and she goes forward,
+// pull and she backs, row one side and she turns, hold a blade still in the water and it drags her round. Open the
+// hand and the oar stays in its grommet and trails beside her; the river's current and her own keel bring her
+// straight again, so a rider who only wants to look can let both go and still come to the well.
 //
 // THE SEAT. The rider's head is put 0.95 m above the water whatever chair they sit in (their height when they come
 // aboard is taken as sitting height). The hull rocks; the rider's horizon never does.
 import * as THREE from 'three';
 import { makePaint, shared } from './paint.js';
 import { woodSheet } from './art.js';
-import { buildCanoe, buildLantern, buildPaddle, PADDLE } from './craft.js';
+import { buildCanoe, buildLantern, buildOar, buildMitten, OAR } from './craft.js';
 import { river, LENGTH } from './river.js';
 import { track, clamp } from './noise.js';
 
 export const EYE = 0.95;
-const CURRENT = [[-40, 0.2], [0, 0.26], [60, 0.42], [366, 0.42], [420, 0.24], [560, 0.24], [600, 0.42], [800, 0.45], [880, 0.3], [960, 0.14], [1010, 0.0]];
+// THE CURRENT. She floats down the whole river with nobody rowing: about walking pace between the set pieces, slower
+// where there is something to look at, and still at the well. The current has a thread, the line the deepest water
+// takes, and the water either side of it leans toward it; so a boat left to itself is carried round the giant's
+// hand, between the gate's posts, along the stone ship and through the gap in the loom, and never into a bank.
+const CURRENT = [[-40, 0.5], [0, 0.5], [40, 0.8], [150, 0.95], [262, 0.9], [286, 0.55], [318, 0.6], [340, 0.9], [366, 0.62], [400, 0.5], [440, 0.55], [560, 0.6], [600, 0.95], [700, 0.85], [728, 0.5], [790, 0.55], [808, 0.85], [880, 0.6], [960, 0.3], [1010, 0.0]];
+const THREAD = [[-40, -1.5], [0, -1.5], [46, 0], [280, 0], [298, 2.5], [314, 2.5], [334, 0], [440, 0], [462, 2.6], [500, 2.6], [530, 0], [760, 0], [772, 1.2], [786, 1.2], [800, 0], [1060, 0]];
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), v4 = new THREE.Vector3(), m4 = new THREE.Matrix4(), q1 = new THREE.Quaternion();
 const lerp = (a, b, t) => a + (b - a) * t, ease = (q) => q * q * (3 - 2 * q);
+const MITT = new THREE.Matrix4().makeRotationZ(Math.PI / 2);       // an empty hand: what it would hold stands upright in it, as a controller does
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class Boat {
@@ -38,8 +46,16 @@ export class Boat {
     this.lantern.add(iron, panes); this.flameLocal = new THREE.Vector3().fromArray(lan.flame);
     this.hull.add(this.lantern); this.group.add(this.hull);
     world.addMoving(this.group);
-    this.paddle = new THREE.Mesh(buildPaddle(), this.woodMat); this.paddle.name = 'paddle'; this.paddle.frustumCulled = false;
-    world.addMoving(this.paddle);
+    const oarGeo = buildOar();
+    this.oars = [-1, 1].map((side) => {
+      const mesh = new THREE.Mesh(oarGeo, this.woodMat); mesh.name = side < 0 ? 'port oar' : 'starboard oar'; mesh.frustumCulled = false; world.addMoving(mesh);
+      const rest = new THREE.Vector3(side * 0.75, -0.245, 0.61).normalize();                  // trailing: out, a little aft, the blade lying on the water
+      return { side, mesh, lock: new THREE.Vector3().fromArray(canoe.locks[side < 0 ? 0 : 1]), rest, dir: rest.clone(), len: 0.4, set: false,
+        G: new THREE.Vector3(), A: new THREE.Vector3(), N: new THREE.Vector3(0, 1, 0), tip: new THREE.Vector3(),      // in the world: the hand's place on it, the way it runs, the blade's face, its tip
+        hand: null, mode: 'rest', feather: 1, amp: 1,
+        samples: [0.2, 0.55, 0.88].map((q) => ({ q, prev: new THREE.Vector3(), has: false, vel: new THREE.Vector3() })), wet: 0, dripClock: 0, inWater: 0, force: 0 };
+    });
+    this.woolMat = makePaint({ color: '#e6dcc6', brush: 0.34, brushScale: 7, side: THREE.DoubleSide, inside: 0.8, rim: { color: '#fff4dc', strength: 0.3, power: 3 } });
 
     this.flame = new THREE.Vector3(0, 0.5, 0);
     this.glow = glows.add({ position: this.flame, size: 0.3, color: new THREE.Color('#ffb054'), power: 1, flicker: 0.3 });
@@ -55,19 +71,19 @@ export class Boat {
     this.sound = { swish: 0, splash: 0, bump: 0, speed: 0, drip: 0 };       // what the ear should be told (src/ifing/audio.js)
     this.stats = { strokes: 0, distance: 0 }; this.asked = [0, 0, 0];
 
-    // the hands
-    const xr = engine.renderer.xr;
+    // the hands: a mitten for each, which closes on the oar of its own side
+    const xr = engine.renderer.xr, mittGeo = buildMitten();
     this.hands = [0, 1].map((i) => {
-      const grip = xr.getControllerGrip(i), h = { grip, on: false, source: null, pos: new THREE.Vector3() };
-      grip.addEventListener('connected', (e) => { h.on = true; h.source = e.data; });
-      grip.addEventListener('disconnected', () => { h.on = false; h.source = null; });
-      engine.rig.add(grip); return h;
+      const grip = xr.getControllerGrip(i), h = { grip, on: false, live: false, source: null, side: i ? 1 : -1, pos: new THREE.Vector3(), squeeze: false, pinch: false, oar: null, near: false, buzz: 0 };
+      grip.addEventListener('connected', (e) => { h.on = true; h.source = e.data; if (e.data && e.data.handedness === 'left') h.side = -1; else if (e.data && e.data.handedness === 'right') h.side = 1; });
+      grip.addEventListener('disconnected', () => { h.on = false; h.source = null; h.squeeze = h.pinch = false; });
+      grip.addEventListener('squeezestart', () => { h.squeeze = true; }); grip.addEventListener('squeezeend', () => { h.squeeze = false; });
+      grip.addEventListener('selectstart', () => { h.pinch = true; }); grip.addEventListener('selectend', () => { h.pinch = false; });
+      engine.rig.add(grip);
+      h.mitt = new THREE.Mesh(mittGeo, this.woolMat); h.mitt.name = 'mitten'; h.mitt.frustumCulled = false; h.mitt.visible = false; h.mitt.matrixAutoUpdate = false; world.addMoving(h.mitt);
+      return h;
     });
-    this.top = 0;
-    this.pT = new THREE.Vector3(); this.pA = new THREE.Vector3(1, 0, 0); this.pN = new THREE.Vector3(0, 1, 0); this.poseSet = false;
-    this.samples = [0.18, 0.5, 0.85].map((q) => ({ q, prev: new THREE.Vector3(), has: false, vel: new THREE.Vector3() }));
-    this.stroke = { p: 0.6, side: 1, count: 0 };
-    this.wet = 0; this.dripClock = 0; this.inWater = 0;
+    this.stroke = { p: 0.6, count: 0 };
     this.keys = {};
     addEventListener('keydown', (e) => { this.keys[e.code] = true; });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
@@ -78,9 +94,9 @@ export class Boat {
   /** Put her on the river at s, d, lying along it, at rest. */
   place(s, d = 0, turn = 0) {
     const p = river.at(s, {});
-    this.pos.set(p.x + p.rx * d, p.z + p.rz * d); this.heading = p.heading + turn; this.u = this.w = this.om = 0; this.s = s; this.d = d;
-    for (const sm of this.samples) sm.has = false;
-    this.poseSet = false; this.sync(0, 0);
+    this.pos.set(p.x + p.rx * d, p.z + p.rz * d); this.heading = p.heading + turn; this.u = track(CURRENT, s) * 0.6; this.w = this.om = 0; this.s = s; this.d = d;      // (already on the current: she does not start from rest)
+    for (const o of this.oars) { o.set = false; for (const sm of o.samples) sm.has = false; }
+    this.sync(0, 0);
   }
 
   /** Take where the rider's head is now as the seat (called on coming aboard, and when they ask to be re-seated). */
@@ -91,49 +107,77 @@ export class Boat {
 
   get forward() { return v4.set(-Math.sin(this.heading), 0, -Math.cos(this.heading)); }
 
-  // ---- the paddle's place: from the hands, from the keys, or at rest across the gunwales
-  pose(dt, drive, steer, headingErr) {
-    const rig = this.engine.rig, vr = this.engine.presenting;
-    const live = vr ? this.hands.filter((h) => h.on && h.grip.visible) : [];
-    for (const h of live) h.pos.copy(h.grip.position).applyMatrix4(rig.matrixWorld);
-    const T = v1, A = v2, N = v3; let tracked = false, feather = false;
-    if (live.length === 2 && Math.abs(drive) < 0.3) {
-      const [a, b] = live;
-      if (a.pos.y > b.pos.y + 0.06) this.top = 0; else if (b.pos.y > a.pos.y + 0.06) this.top = 1;
-      const hi = this.top === 0 ? a : b, lo = this.top === 0 ? b : a;
-      T.copy(hi.pos); A.copy(lo.pos).sub(hi.pos);
-      if (A.length() > 0.2) A.normalize(); else A.copy(this.pA);
-      tracked = true;
-    } else if (live.length === 1 && Math.abs(drive) < 0.3) {
-      const h = live[0]; h.grip.getWorldQuaternion(q1);
-      A.set(0, -0.35, -1).normalize().applyQuaternion(q1); T.copy(h.pos).addScaledVector(A, -0.55); tracked = true;
-    } else if (Math.abs(drive) > 0.05) {
-      // a stroke made for the rider: the same blade in the same water, moved along a paddler's path
-      const st = this.stroke, back = drive < 0;
-      st.p += dt * 0.6 * (0.55 + 0.45 * Math.abs(drive));
-      if (st.p >= 1) {
-        st.p -= 1; st.count++;
-        const need = steer * 1.2 + clamp(headingErr * 2, -1, 1);                // > 0: she should come round to the right, so paddle on the left
-        if (need > 0.2) st.side = -1; else if (need < -0.2) st.side = 1; else if (st.count % 3 === 0) st.side = -st.side;
+  /** Does this hand mean to hold? The grip or the trigger of a controller, or the pinch of a bare hand. */
+  closed(h) {
+    const gp = h.source && h.source.gamepad; let on = h.squeeze || h.pinch;
+    if (gp && gp.buttons) { const b0 = gp.buttons[0], b1 = gp.buttons[1]; on = (b0 && (b0.pressed || b0.value > 0.5)) || (b1 && (b1.pressed || b1.value > 0.5)) || (!gp.buttons.length && on); }
+    return !!on;
+  }
+  pulse(h, strength, ms) {
+    try { const gp = h.source && h.source.gamepad, a = gp && (gp.hapticActuators && gp.hapticActuators[0]); if (a && a.pulse) a.pulse(clamp(strength, 0, 1), ms); } catch { /* a controller without a motor */ }
+  }
+
+  // ---- where the oars are: in the hands that hold them, moved for the rider by the keys, or trailing in their grommets
+  poseOars(dt, drive = 0, steer = 0, headingErr = 0) {
+    const rig = this.engine.rig, vr = this.engine.presenting, hullM = this.hull.matrixWorld, inv = m4.copy(hullM).invert();
+    for (const h of this.hands) {
+      h.live = vr && h.on && h.grip.visible;
+      if (h.live) h.pos.copy(h.grip.position).applyMatrix4(rig.matrixWorld);
+      const o = this.oars[h.side < 0 ? 0 : 1], want = h.live && this.closed(h);
+      if (h.oar && !want) { h.oar.hand = null; h.oar = null; }                                   // the hand opens: the oar is its own again
+      if (dt > 0 && h.live && !h.oar && !o.hand && o.set) {
+        // near enough to take: anywhere along the loom, from the handle to the keip
+        v1.copy(o.lock).applyMatrix4(hullM).sub(o.G); const l2 = v1.lengthSq() || 1, q = clamp(v2.copy(h.pos).sub(o.G).dot(v1) / l2, -0.15, 0.8);
+        const near = v2.copy(o.G).addScaledVector(v1, q).distanceTo(h.pos) < 0.3;
+        if (near && !h.near) this.pulse(h, 0.25, 25);
+        h.near = near;
+        if (near && want) { h.oar = o; o.hand = h; h.near = false; this.pulse(h, 0.6, 40); for (const sm of o.samples) sm.has = false; }
       }
-      const sd = st.side, zF = -0.98, zB = 0.28; let tx, ty, tz;
-      if (st.p < 0.42) { const q = st.p / 0.42, e = ease(q); tz = back ? lerp(zB, zF, e) : lerp(zF, zB, e); tx = sd * 0.6; ty = -0.36 * Math.min(1, q * 7) * Math.min(1, (1 - q) * 5); }
-      else { const q = (st.p - 0.42) / 0.58, e = ease(q); tz = back ? lerp(zF, zB, e) : lerp(zB, zF, e); tx = sd * (0.6 + 0.28 * Math.sin(Math.PI * q)); ty = 0.09 + 0.17 * Math.sin(Math.PI * q); feather = q > 0.1 && q < 0.9; }
-      T.set(-sd * 0.1, 0.9, tz * 0.3 - 0.34); A.set(tx, ty, tz).sub(T).normalize(); T.set(tx, ty, tz).addScaledVector(A, -PADDLE.length);
-      T.applyMatrix4(this.group.matrixWorld); A.transformDirection(this.group.matrixWorld);
-    } else {
-      // at rest, laid across the gunwales in front of the rider
-      T.set(-0.8, 0.345, -0.6).applyMatrix4(this.hull.matrixWorld); A.set(1, 0.0, 0.05).normalize().transformDirection(this.hull.matrixWorld); feather = true;
-      this.stroke.p = 0.6;
     }
-    // the blade faces the way she is going (so that a pull drives her), or lies flat when it is carried forward
-    const f = feather ? UP : this.forward; N.copy(f).addScaledVector(A, -f.dot(A));
-    if (N.lengthSq() < 0.01) N.copy(UP).addScaledVector(A, -UP.dot(A));
-    N.normalize();
-    const k = tracked || !this.poseSet ? 1 : 1 - Math.exp(-dt * 16);
-    this.pT.lerp(T, k); this.pA.lerp(A, k).normalize(); this.pN.lerp(N, tracked || !this.poseSet ? 1 : 1 - Math.exp(-dt * 9));
-    this.pN.addScaledVector(this.pA, -this.pN.dot(this.pA)).normalize(); this.poseSet = true;
-    return tracked;
+    // a stroke made for the rider (keys, a thumbstick): the same oars in the same water, moved along a rower's path
+    const scripted = Math.abs(drive) > 0.05, st = this.stroke, back = drive < 0;
+    if (scripted && dt > 0) {
+      st.p += dt * 0.6 * (0.55 + 0.45 * Math.abs(drive));
+      if (st.p >= 1) { st.p -= 1; st.count++; }
+      const need = clamp(steer * 1.2 + clamp(headingErr * 2, -1, 1), -1, 1) * (back ? -1 : 1);      // > 0: she should come round to the right, so the left oar works and the right one rests
+      this.oars[0].amp += (clamp(1 + need * 1.4, 0, 1) - this.oars[0].amp) * Math.min(1, dt * 4); this.oars[1].amp += (clamp(1 - need * 1.4, 0, 1) - this.oars[1].amp) * Math.min(1, dt * 4);
+    } else if (!scripted && dt > 0) st.p = 0.6;
+    for (const o of this.oars) {
+      const L = o.lock, sg = o.side; let k, feather = 0;
+      const held = o.hand && o.hand.live;
+      if (held || scripted) {
+        // the hand's place, in her own frame
+        if (held) v1.copy(o.hand.pos).applyMatrix4(inv);
+        else {
+          const a = o.amp, sw = 0.27 * Math.max(a, 0.15); let z, y;
+          if (st.p < 0.45) { const q = st.p / 0.45, e = ease(q); z = back ? lerp(-sw, sw, e) : lerp(sw, -sw, e); y = a > 0.15 ? 0.03 + 0.13 * Math.min(1, q * 6) * Math.min(1, (1 - q) * 6) : -0.05; }
+          else { const q = (st.p - 0.45) / 0.55, e = ease(q); z = back ? lerp(sw, -sw, e) : lerp(-sw, sw, e); y = -0.035 - 0.045 * Math.sin(Math.PI * q); feather = q > 0.08 && q < 0.92 ? 1 : 0; }
+          if (a <= 0.15) feather = 1;
+          v1.set(L.x - sg * 0.36, L.y + y, L.z + z);
+        }
+        // the oar runs from the hand through the keip. The hand may not cross the gunwale, nor lift the oar out of its hook
+        if ((L.x - v1.x) * sg < 0.1) v1.x = L.x - sg * 0.1;
+        v2.copy(L).sub(v1); const l = v2.length() || 1; v2.divideScalar(l);
+        v2.y = clamp(v2.y, -0.82, 0.5); v2.normalize();
+        k = held ? 1 - Math.exp(-dt * 45) : 1 - Math.exp(-dt * 16);
+        if (!o.set || (held && o.mode !== 'held' && dt > 0)) k = Math.max(k, 0.5);
+        o.dir.lerp(v2, k).normalize(); o.len += (clamp(l, 0.2, 0.8) - o.len) * k;
+        o.mode = held ? 'held' : 'keys';
+      } else {
+        // let go: it settles back into trailing, the blade flat on the water and nodding with it
+        k = o.set ? 1 - Math.exp(-dt * 3.2) : 1;
+        v2.copy(o.rest); v2.y += 0.012 * Math.sin(shared.uTime.value * 1.3 + sg); v2.z += clamp(this.u, -1, 2) * 0.1; v2.normalize();
+        o.dir.lerp(v2, k).normalize(); o.len += (0.4 - o.len) * k; feather = 1; o.mode = 'rest';
+      }
+      o.set = true;
+      o.A.copy(o.dir).transformDirection(hullM); v1.copy(L).applyMatrix4(hullM); o.G.copy(v1).addScaledVector(o.A, -o.len); o.tip.copy(o.G).addScaledVector(o.A, OAR.length);
+      // the blade stands square to the way she goes (so that a push drives her), or lies flat when it is carried or left
+      o.feather += (feather - o.feather) * (dt > 0 ? Math.min(1, dt * 12) : 0); if (!this._posed) o.feather = feather;
+      const f = v3.copy(this.forward).lerp(UP, o.feather); f.addScaledVector(o.A, -f.dot(o.A));
+      if (f.lengthSq() < 0.01) f.copy(UP).addScaledVector(o.A, -UP.dot(o.A));
+      o.N.copy(f).normalize();
+    }
+    this._posed = true;
   }
 
   /** dt: the frame; look: the reach's colours (for the lantern); input: { drive, steer } from keys or a thumbstick. */
@@ -156,36 +200,52 @@ export class Boat {
     const here = river.at(clamp(this.s, 0, LENGTH), {});
     const fwd = this.forward.clone(), right = new THREE.Vector3(Math.cos(this.heading), 0, -Math.sin(this.heading));
     const err = wrap(here.heading - this.heading);                           // > 0: the river lies to her left
-    this.asked = [drive, steer, -err]; this.pose(dt, drive, steer, -err);
-    // ---- the water on the blade
-    const cur = track(CURRENT, this.s) * (1 - this.hold), cx = here.tx * cur, cz = here.tz * cur;
-    let Fx = 0, Fz = 0, tau = 0, sub = 0, speed = 0;
-    const px = this.pos.x + fwd.x * 0.5, pz = this.pos.y + fwd.z * 0.5, { length: Lp, blade: Lb } = PADDLE;
-    for (const sm of this.samples) {
-      v1.copy(this.pT).addScaledVector(this.pA, Lp - Lb + sm.q * Lb);
-      if (sm.has && dt > 1e-4) {
-        v2.copy(v1).sub(sm.prev).divideScalar(dt);
-        if (v2.lengthSq() < 144) sm.vel.lerp(v2, 0.6); else sm.vel.set(0, 0, 0);                    // a jump in the tracking is not a stroke
+    this.asked = [drive, steer, -err]; this.poseOars(dt, drive, steer, -err);
+    // ---- the water on the blades
+    const cur = track(CURRENT, this.s) * (1 - this.hold), lean = clamp((track(THREAD, this.s) - this.d) * 0.24, -0.45, 0.45) * (1 - this.hold) * Math.min(1, cur * 3);
+    const cx = here.tx * cur + here.rx * lean, cz = here.tz * cur + here.rz * lean;
+    let Fx = 0, Fz = 0, tau = 0, subs = [0, 0], swish = 0;
+    const px = this.pos.x + fwd.x * 0.5, pz = this.pos.y + fwd.z * 0.5, { length: Lo, blade: Lb } = OAR;
+    for (let n = 0; n < 2; n++) {
+      const o = this.oars[n]; let sub = 0, speed = 0, fo = 0;
+      if (o.mode === 'rest') {
+        // trailing: no work is done, but it marks the water as she moves
+        for (const sm of o.samples) sm.has = false;
+        v1.copy(o.G).addScaledVector(o.A, Lo - Lb * 0.4);
+        if (v1.y < 0.03 && o.inWater <= 0.3) { snd.splash = Math.max(snd.splash, 0.3); this.water.ripples.touch(v1.x, v1.z, 0.24, 0.4); }
+        o.inWater = v1.y < 0.03 ? 1 : 0; o.force = 0;
+        const sp = Math.hypot(this.u - cur, this.w); if (o.inWater && sp > 0.15) this.water.ripples.touch(v1.x, v1.z, 0.16, clamp(sp * 0.03, 0, 0.08));
+        continue;
       }
-      sm.prev.copy(v1); sm.has = true;
-      const f = clamp((-v1.y + 0.02) / 0.07); if (f <= 0) continue;
-      v2.set(sm.vel.x - cx, sm.vel.y, sm.vel.z - cz); v2.addScaledVector(this.pA, -v2.dot(this.pA));   // across the shaft
-      v3.copy(this.pN).multiplyScalar(this.pN.dot(v2) * 0.65).addScaledVector(v2, 0.35);              // mostly what meets the blade's face
-      const sp = Math.hypot(v3.x, v3.z); if (sp < 0.1) { sub += f / 3; continue; }
-      const k = -0.72 / 3 * f * sp, fx = v3.x * k, fz = v3.z * k;
-      Fx += fx; Fz += fz; tau += (v1.z - pz) * fx - (v1.x - px) * fz;
-      sub += f / 3; speed += sp * f / 3;
-      this.water.ripples.touch(v1.x, v1.z, 0.2, clamp(sp * 0.07, 0, 0.3) * f);
+      for (const sm of o.samples) {
+        v1.copy(o.G).addScaledVector(o.A, Lo - Lb + sm.q * Lb);
+        if (sm.has && dt > 1e-4) {
+          v2.copy(v1).sub(sm.prev).divideScalar(dt);
+          if (v2.lengthSq() < 400) sm.vel.lerp(v2, 0.6); else sm.vel.set(0, 0, 0);                  // a jump in the tracking is not a stroke
+        }
+        sm.prev.copy(v1); sm.has = true;
+        const f = clamp((-v1.y + 0.02) / 0.07); if (f <= 0) continue;
+        v2.set(sm.vel.x - cx, sm.vel.y, sm.vel.z - cz); v2.addScaledVector(o.A, -v2.dot(o.A));       // across the shaft
+        v3.copy(o.N).multiplyScalar(o.N.dot(v2) * 0.7).addScaledVector(v2, 0.3);                    // mostly what meets the blade's face
+        const sp = Math.hypot(v3.x, v3.z); if (sp < 0.1) { sub += f / 3; continue; }
+        const k = -0.26 / 3 * f * sp, fx = v3.x * k, fz = v3.z * k;
+        Fx += fx; Fz += fz; tau += (v1.z - pz) * fx - (v1.x - px) * fz; fo += Math.hypot(fx, fz);
+        sub += f / 3; speed += sp * f / 3;
+        this.water.ripples.touch(v1.x, v1.z, 0.2, clamp(sp * 0.06, 0, 0.3) * f);
+      }
+      // going in, coming out, the drops that fall from the blade after, and what the hand is told of it
+      v1.copy(o.G).addScaledVector(o.A, Lo - Lb * 0.3);
+      if (sub > 0.3 && o.inWater <= 0.3) { snd.splash = Math.max(snd.splash, clamp(0.25 + speed * 0.3, 0, 1)); this.water.ripples.touch(v1.x, v1.z, 0.26, 0.5); this.stats.strokes++; if (o.hand) this.pulse(o.hand, 0.5, 35); }
+      if (sub > 0.3) o.wet = 1; else if (o.wet > 0) {
+        o.wet = Math.max(0, o.wet - dt * 0.45); o.dripClock -= dt;
+        if (o.dripClock <= 0 && v1.y < 0.9) { o.dripClock = 0.07 + (1 - o.wet) * 0.3; this.water.ripples.touch(o.tip.x, o.tip.z, 0.07, 0.16 * o.wet); snd.drip = o.wet; }
+      }
+      if (o.hand && fo > 0.25) { o.hand.buzz -= dt; if (o.hand.buzz <= 0) { o.hand.buzz = 0.05; this.pulse(o.hand, 0.08 + fo * 0.14, 45); } }
+      o.inWater = sub; o.force = fo; subs[n] = sub; swish = Math.max(swish, clamp(sub * speed * 0.45, 0, 1));
     }
     const Fm = Math.hypot(Fx, Fz); if (Fm > 7) { Fx *= 7 / Fm; Fz *= 7 / Fm; tau *= 7 / Fm; }
-    // going in, coming out, and the drops that fall from the blade after
-    v1.copy(this.pT).addScaledVector(this.pA, Lp - Lb * 0.3);
-    if (sub > 0.3 && this.inWater <= 0.3) { snd.splash = clamp(0.25 + speed * 0.4, 0, 1); this.water.ripples.touch(v1.x, v1.z, 0.26, 0.5); this.stats.strokes++; }
-    if (sub > 0.3) this.wet = 1; else if (this.wet > 0) {
-      this.wet = Math.max(0, this.wet - dt * 0.45); this.dripClock -= dt;
-      if (this.dripClock <= 0 && v1.y < 0.7) { this.dripClock = 0.07 + (1 - this.wet) * 0.3; v2.copy(this.pT).addScaledVector(this.pA, Lp); this.water.ripples.touch(v2.x, v2.z, 0.07, 0.16 * this.wet); snd.drip = this.wet; }
-    }
-    this.inWater = sub; snd.swish += (clamp(sub * speed * 0.6, 0, 1) - snd.swish) * Math.min(1, dt * 12);
+    tau *= 0.45;                                                              // (her keel and her length resist the long lever of an oar)
+    snd.swish += (swish - snd.swish) * Math.min(1, dt * 12);
 
     // ---- her own way through the water
     const Ff = Fx * fwd.x + Fz * fwd.z, Fl = Fx * right.x + Fz * right.z;
@@ -218,8 +278,7 @@ export class Boat {
     }
 
     // ---- how she lies in the water: a little down by the side the blade is on, a little by the stern when she is driven
-    const side = Math.sign((this.pT.x + this.pA.x * Lp - this.pos.x) * right.x + (this.pT.z + this.pA.z * Lp - this.pos.y) * right.z);
-    const rollT = -side * sub * 0.028 - clamp(Fl, -2, 2) * 0.012 + Math.sin(time * 0.83) * 0.007 + Math.sin(time * 1.31 + 1) * 0.004;
+    const rollT = (subs[0] - subs[1]) * 0.022 - clamp(Fl, -2, 2) * 0.012 + Math.sin(time * 0.83) * 0.007 + Math.sin(time * 1.31 + 1) * 0.004;
     const pitchT = clamp(Ff, -3, 3) * 0.006 + Math.sin(time * 0.61 + 2) * 0.004;
     this.roll += (rollT - this.roll) * Math.min(1, dt * 3.5); this.pitch += (pitchT - this.pitch) * Math.min(1, dt * 3);
     // the lantern swings on its ring
@@ -228,9 +287,9 @@ export class Boat {
     // her wake: the bow parts the water, the stern leaves it turning
     const spd = Math.hypot(this.u - cu, this.w);
     if (spd > 0.08) {
-      const k = clamp(spd * 0.05, 0, 0.14), bz = this.canoe.bow + 0.35, sz = this.canoe.stern - 0.2, j = Math.sin(time * 37) * 0.1;
-      this.water.ripples.touch(this.pos.x + fwd.x * -bz + right.x * j, this.pos.y + fwd.z * -bz + right.z * j, 0.3, k);
-      this.water.ripples.touch(this.pos.x + fwd.x * -sz - right.x * j, this.pos.y + fwd.z * -sz - right.z * j, 0.32, -k * 0.7);
+      const k = clamp(spd * 0.02, 0, 0.05) * Math.min(2, dt * 60), bz = this.canoe.bow + 0.35, sz = this.canoe.stern - 0.2, j = Math.sin(time * 37) * 0.1;
+      this.water.ripples.touch(this.pos.x + fwd.x * -bz + right.x * j, this.pos.y + fwd.z * -bz + right.z * j, 0.22, k);
+      this.water.ripples.touch(this.pos.x + fwd.x * -sz - right.x * j, this.pos.y + fwd.z * -sz - right.z * j, 0.24, -k * 0.7);
     }
     snd.speed = spd;
     this.sync(dt, time); this.light(look, time);
@@ -243,18 +302,35 @@ export class Boat {
     this.hull.rotation.set(this.pitch, 0, this.roll); this.hull.position.y = Math.sin(time * 1.13) * 0.004;
     this.lantern.rotation.set(this.swing.x, 0, this.swing.y);
     if (this.engine.presenting) {
-      if (!this.seat.set) this.seatHere();
+      // the seat is taken a few frames after coming aboard: on the first, the headset has not yet said where the head is
+      this.aboard = (this.aboard || 0) + 1;
+      if (!this.seat.set && this.aboard > 4) this.seatHere();
+      if (!this.seat.set) { this.seat.x = cam.position.x; this.seat.y = clamp(cam.position.y, 0.5, 1.9); this.seat.z = cam.position.z; }
       const rot = this.heading - this.seat.yaw, c = Math.cos(rot), s = Math.sin(rot);
       rig.rotation.y = rot; rig.position.set(this.pos.x - (this.seat.x * c + this.seat.z * s), EYE - this.seat.y, this.pos.y - (-this.seat.x * s + this.seat.z * c));
     } else {
+      this.aboard = 0;
       rig.rotation.y = this.heading; rig.position.set(this.pos.x, 0, this.pos.y);
       cam.position.set(0, EYE, 0); cam.rotation.set(this.view.pitch, this.view.yaw, 0, 'YXZ');
     }
     rig.updateMatrixWorld(true); g.updateMatrixWorld(true);
-    // the paddle: between the hands as they are now
-    if (dt === 0 || this.frozen) this.pose(0, 0, 0, 0); else if (this.engine.presenting) this.pose(0, ...this.asked);
-    v2.copy(this.pA).negate(); v1.crossVectors(v2, this.pN).normalize();
-    m4.makeBasis(v1, v2, this.pN); this.paddle.quaternion.setFromRotationMatrix(m4); this.paddle.position.copy(this.pT); this.paddle.updateMatrixWorld(true);
+    // the oars: where the hands have them now that she has moved; and the hands themselves
+    this.poseOars(0, ...(this.frozen ? [0, 0, 0] : this.asked));
+    for (const o of this.oars) {
+      v2.copy(o.A).negate(); v1.crossVectors(v2, o.N).normalize();
+      m4.makeBasis(v1, v2, o.N); o.mesh.quaternion.setFromRotationMatrix(m4); o.mesh.position.copy(o.G); o.mesh.updateMatrixWorld(true);
+    }
+    for (const h of this.hands) {
+      h.mitt.visible = h.live; if (!h.live) continue;
+      if (h.oar) {
+        // closed on the oar: across it, the wrist toward the rower
+        const o = h.oar; v1.copy(o.A); v3.set(Math.sin(this.heading), 0.25, Math.cos(this.heading)); v3.addScaledVector(v1, -v3.dot(v1)).normalize(); v2.crossVectors(v3, v1);
+        h.mitt.matrix.makeBasis(v1, v2, v3).setPosition(o.G);
+      } else {
+        h.grip.updateWorldMatrix(true, false); h.mitt.matrix.copy(h.grip.matrixWorld).multiply(MITT);
+      }
+      h.mitt.matrixWorld.copy(h.mitt.matrix);
+    }
     this.flame.copy(this.flameLocal); this.lantern.localToWorld(this.flame);
   }
 

@@ -9,13 +9,13 @@ WebXR toys for Quest 3, built on Meta's Immersive Web SDK.
 
 ## Ífing (a river by canoe)
 
-A kilometre of river through a forest out of the old North, at night, paddled by hand. No score and nothing to win: the boathouse at blue hour, the Ironwood and the giant asleep in its hillside, a gatehouse and a ship of standing stones, a golden grove. Everything in it is made in code; there are no model, image or sound files.
+A kilometre of river through a forest out of the old North, at night, in a small boat with a pair of oars. No score and nothing to win: the boathouse at blue hour, the Ironwood and the giant asleep in its hillside, a gatehouse and a ship of standing stones, a golden grove. Everything in it is made in code; there are no model, image or sound files.
 
 **Play:** https://kaipeterhoffman-droid.github.io/VR-fun/ifing/ then press **Enter the river**. Sit down first.
 
-Hold a controller in each hand as if they gripped one paddle, upper hand on the grip and lower hand on the shaft. Dip the blade and pull the water back past you. A stroke on the right turns her left, and a blade held still in the water drags like a rudder. The current carries you on slowly if you would rather only look.
+The river carries you by itself: do nothing and you float the whole way in a little under half an hour. To row, reach forward and take an oar in each hand with the grip or the trigger, dip the blades and push them away from you (you face the way she goes, so a push drives her on and a pull backs her). Row one side to turn. Let go and the oars trail beside her.
 
-On a desktop, drag to look and use the arrow keys to paddle. Add `?from=370` to the address to set off just above the gatehouse, or `?from=640` at the head of the golden grove.
+On a desktop, drag to look and use the arrow keys to row. Add `?from=370` to the address to set off just above the gatehouse, or `?from=640` at the head of the golden grove.
 
 ## Trick Shot (two players, one headset)
 

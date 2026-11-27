@@ -14,6 +14,7 @@ import { Glows } from './fx.js';
 import { Boat, EYE } from './boat.js';
 import { buildStage } from './stage.js';
 import { START } from './naust.js';
+import { river } from './river.js';
 
 const Q = new URLSearchParams(location.search);
 const num = (k, d) => (Q.has(k) ? parseFloat(Q.get(k)) : d);
@@ -57,7 +58,7 @@ async function begin() {
   boat.place(START.s, START.d, START.turn);
   if (Q.has('from')) boat.place(num('from', START.s), 0, 0);            // ?from=380: set off from further down the river, to try one reach
   if (preview) { boat.frozen = true; if (Q.has('s')) boat.place(num('s', 2), num('d', 0), num('turn', 0) * Math.PI / 180); boat.view.yaw = num('yaw', 0) * Math.PI / 180; boat.view.pitch = num('pitch', 0) * Math.PI / 180; }
-  if (Q.has('noboat')) { boat.group.visible = false; boat.paddle.visible = false; boat.glow.on = 0; }
+  if (Q.has('noboat')) { boat.group.visible = false; for (const o of boat.oars) o.mesh.visible = false; boat.glow.on = 0; }
   let time = num('t', 0);
   const eyeY = num('eye', EYE), eyeW = new THREE.Vector3(), camAt = Q.has('cam') ? Q.get('cam').split(',').map(Number) : null;      // ?cam=x,y,z: look at her from outside
 
@@ -80,7 +81,7 @@ async function begin() {
   if (Q.has('nomirror')) world.mirrorOn = false;
   if (Q.has('noripple')) water.ripples.ok = false;
   if (Q.has('nowater')) water.mesh.visible = false;
-  window.__ifing = { engine, world, look, water, sky, boat, stage, glows };
+  window.__ifing = { engine, world, look, water, sky, boat, stage, glows, river };
 
   // ---- looking about with the mouse, outside the headset
   const dom = renderer.domElement; let drag = null;

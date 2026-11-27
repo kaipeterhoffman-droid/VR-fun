@@ -1,12 +1,12 @@
 // Craft: what hands have made, as against what has grown. The canoe and all that is in it, the lantern at her bow,
-// the paddle; and the same shipwright's work at five times the size, for the ship the mere remembers.
+// her oars; and the same shipwright's work at five times the size, for the ship the mere remembers.
 //
 // The canoe is the nearest thing to the eye for the whole journey, so she is built plank by plank: overlapping
 // strakes (clinker, the northern way), ribs, thwarts, a carved stem that ends in a curl, a rope coiled in the bow.
 // Local frame of everything here: the bow is toward -z, +y is up, the water is at y = 0.
 import * as THREE from 'three';
 import { Builder, col, mulCol } from './build.js';
-import { tube } from './flora.js';
+import { tube, lump } from './flora.js';
 import { WOOD_U } from './art.js';
 
 const TAU = Math.PI * 2;
@@ -35,7 +35,7 @@ export function beam(b, A, B, wide, thick, upHint, U, c = WHITE, vScale = 1.3) {
  */
 export function buildHull(o) {
   const { L, beam: BM, draft, sheerMid, sheerEnd, floorY = 0.035, N = 18, K = 5, lap = 0.012, skin = 0.014, ribs = 8,
-    out = WOOD_U.tar, inn = WOOD_U.tar, tintOut = WHITE, tintIn = WHITE, floor = true, inside = true, grain = 1.3 } = o;
+    out = WOOD_U.strake, inn = WOOD_U.strake, tintOut = WHITE, tintIn = WHITE, floor = true, inside = true, grain = 1.3 } = o;
   const b = new Builder(2400);
   const half = (t) => BM / 2 * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(t), 2.3)), 0.72);
   const keelY = (t) => -draft * (1 - Math.pow(Math.abs(t), 3));
@@ -118,12 +118,14 @@ export function stemPost(b, z0, dir, y0, y1, rise, R0, r, turns, U, tint) {
   tube(b, pts, 6, (i, j, t) => mulCol(tint, 0.75 + 0.35 * (j % 2)), null, mulCol(tint, 0.7), U, r * 12.5);
 }
 
+export const LOCK_Z = -0.24;        // where the oars cross the gunwales, ahead of the rower (who sits at the origin)
+
 /**
  * The canoe. Returns { hull: Builder (wood sheet), iron: Builder, lines, hook: [x, y, z] where the lantern hangs,
  * seats: [z, ...], sheerAt(z) }. `zc` is where her middle lies ahead of the paddler, who sits at the origin.
  */
 export function buildCanoe(zc = -0.5) {
-  const lines = buildHull({ L: 4.3, beam: 0.92, draft: 0.11, sheerMid: 0.29, sheerEnd: 0.42, tintOut: [0.9, 0.84, 0.8], tintIn: [1.0, 0.94, 0.86], inn: WOOD_U.tar });
+  const lines = buildHull({ L: 4.3, beam: 1.04, draft: 0.11, sheerMid: 0.29, sheerEnd: 0.42, tintOut: [0.9, 0.84, 0.8], tintIn: [1.0, 0.94, 0.86] });
   const { L, half, sheerY, inner } = lines, b = lines.b, zOf = (t) => t * L / 2;
   // the gunwales: a pale worn rail along each sheer
   for (const side of [-1, 1]) {
@@ -160,6 +162,16 @@ export function buildCanoe(zc = -0.5) {
       face(tmp, P(u1 * w, y0, -d), P(u0 * w, y0, -d), P(u0 * w, y1, -d), P(u1 * w, y1, -d), WOOD_U.pale, 0, 0.05, mulCol(c, 0.6), mulCol(c, 0.9));
     }
     for (const sx of [-1, 1]) face(tmp, P(sx * w, y0, -d * sx), P(sx * w, y0, d * sx), P(sx * w, y1 + 0.006, d * sx), P(sx * w, y1, -d * sx), WOOD_U.pale, 0, 0.05, mulCol(RED, 0.55), mulCol(RED, 0.85)); }
+  // the keipar: on each gunwale a carved hook of grown wood for the oar to lie in, and a grommet of rope to keep it
+  // there when the hand lets go. They stand a little ahead of the rower, who faces the way she goes and pushes.
+  const locks = [];
+  for (const side of [-1, 1]) {
+    const zl = LOCK_Z - zc, t = zl / (L / 2), x = side * (half(t) + 0.022), y = sheerY(t) + 0.004;
+    beam(tmp, [x, y + 0.012, zl - 0.1], [x, y + 0.012, zl + 0.1], 0.046, 0.03, [0, 1, 0], WOOD_U.pale, [0.82, 0.76, 0.68]);
+    tube(b, [[x, y + 0.02, zl + 0.075, 0.017], [x, y + 0.062, zl + 0.082, 0.015], [x, y + 0.098, zl + 0.06, 0.012], [x, y + 0.112, zl + 0.022, 0.008]], 5, (i, j) => mulCol([0.82, 0.76, 0.68], 0.7 + 0.3 * (j % 2)), null, true, WOOD_U.pale);
+    { const pts = []; for (let i = 0; i <= 9; i++) { const a = i / 9 * TAU; pts.push([x + side * 0.004, y + 0.058 + Math.sin(a) * 0.04, zl + Math.cos(a) * 0.044 - 0.006, 0.0055]); } tube(b, pts, 4, (i, j) => mulCol(ROPE, 0.55 + 0.4 * ((i + j) % 2)), null, false, WOOD_U.pale); }
+    locks.push([x, y + 0.056, zl + zc]);
+  }
   tmp.smoothNormals(); b.add(tmp);
   // the lantern's crook: an iron rod stepped in the bow deck, bent forward over the water
   const zh = zOf(-0.87), yh = sheerY(-0.87) - 0.012;
@@ -167,7 +179,7 @@ export function buildCanoe(zc = -0.5) {
   tube(b, crook, 5, () => IRON, null, true, WOOD_U.tar);
   const g = b.build({ bend: false });
   g.translate(0, 0, zc);
-  return { geometry: g, hook: [0, yh + 0.275, zh - 0.262 + zc], lines, zc, bow: zOf(-1) + zc, stern: zOf(1) + zc };
+  return { geometry: g, hook: [0, yh + 0.275, zh - 0.262 + zc], lines, zc, bow: zOf(-1) + zc, stern: zOf(1) + zc, locks };
 }
 
 /** The lantern that hangs from the crook: iron, with four panes of horn. Its origin is the ring it hangs by. */
@@ -202,25 +214,39 @@ export function buildLantern() {
 }
 
 /**
- * The paddle: a single blade of ash, long in the leaf, with a pear grip, and a band of carving at the throat.
- * It hangs down its own -y from the grip at the origin; the blade's faces look along +z and -z.
+ * An oar of the North: long and narrow in the leaf, round in the shaft, thicker in the loom where it lies in the keip,
+ * with a band of carving and a collar of tarred cord. It hangs down its own -y from the hand's place at the origin
+ * (the end of the handle stands a little above that); the blade's faces look along +z and -z.
  */
-export const PADDLE = { length: 1.52, blade: 0.52, half: 0.082 };
-export function buildPaddle() {
-  const b = new Builder(400), { length: Lp, blade: Lb, half: W } = PADDLE, y0 = -(Lp - Lb), ASH = [1, 0.96, 0.9];
-  // the grip: a short bar across the top
-  tube(b, [[-0.05, -0.012, 0, 0.012], [-0.035, -0.008, 0, 0.017], [0, 0, 0, 0.019], [0.035, -0.008, 0, 0.017], [0.05, -0.012, 0, 0.012]], 6, () => mulCol(ASH, 0.9), null, false, WOOD_U.pale);
-  tube(b, [[0, -0.004, 0, 0.018], [0, -0.06, 0, 0.0165], [0, -0.3, 0, 0.0155], [0, y0 + 0.2, 0, 0.0155], [0, y0 + 0.18, 0, 0.0185]], 7, () => ASH, null, false, WOOD_U.pale);
-  tube(b, [[0, y0 + 0.18, 0, 0.0185], [0, y0 + 0.07, 0, 0.0185], [0, y0 + 0.05, 0, 0.0165]], 7, () => [0.9, 0.86, 0.8], null, false, WOOD_U.carved, 0.22);       // the carved band
-  tube(b, [[0, y0 + 0.05, 0, 0.0165], [0, y0 - 0.02, 0, 0.015]], 7, () => ASH, null, false, WOOD_U.pale);
+export const OAR = { length: 2.02, blade: 0.58, half: 0.06, handle: 0.085 };
+export function buildOar() {
+  const b = new Builder(500), { length: Lo, blade: Lb, half: W, handle: Hh } = OAR, y0 = -(Lo - Lb), ASH = [1, 0.96, 0.9];
+  tube(b, [[0, Hh, 0, 0.0125], [0, Hh - 0.012, 0, 0.0165], [0, 0.03, 0, 0.0155], [0, -0.07, 0, 0.0155], [0, -0.085, 0, 0.021]], 7, (i) => mulCol(ASH, i < 2 ? 0.78 : 0.86), null, true, WOOD_U.pale);       // the handle, worn dark by hands
+  tube(b, [[0, -0.085, 0, 0.021], [0, -0.1, 0, 0.022], [0, -0.22, 0, 0.022], [0, -0.235, 0, 0.021]], 7, () => [0.9, 0.86, 0.8], null, false, WOOD_U.carved, 0.22);                                     // the carved band
+  tube(b, [[0, -0.235, 0, 0.021], [0, -0.33, 0, 0.0215]], 7, () => ASH, null, false, WOOD_U.pale);
+  tube(b, [[0, -0.33, 0, 0.0245], [0, -0.345, 0, 0.0265], [0, -0.455, 0, 0.0265], [0, -0.47, 0, 0.0245]], 7, (i, j) => mulCol([0.2, 0.17, 0.15], 0.8 + 0.4 * (j % 2)), null, false, WOOD_U.tar, 0.05);    // the collar
+  tube(b, [[0, -0.47, 0, 0.0215], [0, -0.9, 0, 0.0205], [0, y0 + 0.02, 0, 0.0175], [0, y0 - 0.03, 0, 0.015]], 7, () => ASH, null, false, WOOD_U.pale);
   // the blade: a long leaf, thick down its spine and thin at the edges
-  const tmp = new Builder(120), n = 10, rows = [];
+  const tmp = new Builder(140), n = 11, rows = [];
   for (let i = 0; i <= n; i++) {
-    const q = i / n, y = y0 - q * Lb, w = W * Math.pow(Math.sin(Math.PI * Math.pow(q * 0.94 + 0.03, 0.62)), 0.75) * (i === 0 ? 0.25 : 1), th = 0.013 * (1 - q * 0.72);
-    const v = q * Lb / 0.5, c = mulCol(ASH, 0.95 - 0.12 * q), um = (WOOD_U.pale[0] + WOOD_U.pale[1]) / 2;
+    const q = i / n, y = y0 - q * Lb, w = W * Math.pow(Math.sin(Math.PI * Math.pow(q * 0.93 + 0.035, 0.55)), 0.7) * (i === 0 ? 0.3 : 1), th = 0.0125 * (1 - q * 0.7);
+    const v = q * Lb / 0.5, c = mulCol(ASH, 0.95 - 0.14 * q), um = (WOOD_U.pale[0] + WOOD_U.pale[1]) / 2;
     rows.push([tmp.vert(-w, y, 0, -1, 0, 0, mulCol(c, 0.8), WOOD_U.pale[0], v), tmp.vert(0, y, th, 0, 0, 1, c, um, v), tmp.vert(w, y, 0, 1, 0, 0, mulCol(c, 0.8), WOOD_U.pale[1], v), tmp.vert(0, y, -th, 0, 0, -1, c, um, v)]);
   }
   for (let i = 0; i < n; i++) for (let k = 0; k < 4; k++) { const k1 = (k + 1) % 4; tmp.quad(rows[i][k], rows[i + 1][k], rows[i + 1][k1], rows[i][k1]); }
   tmp.smoothNormals(); b.add(tmp);
   return b.build({ bend: false });
+}
+
+/**
+ * A mitten of undyed wool with a band of madder at the cuff: the rider's hand, closed as a hand is on an oar. What it
+ * holds runs along its x; the wrist leaves along +z and a little up. No vertex colours darker than the wool allows.
+ */
+export function buildMitten() {
+  const b = new Builder(500), WOOL = [0.86, 0.8, 0.68], RED = [0.6, 0.14, 0.09];
+  lump(b, 0, 0.004, -0.004, 0.05, 0.039, 0.052, 2, 61, 0.004, (x, y, z) => mulCol(WOOL, 0.8 + 0.2 * Math.min(1, Math.max(0, 0.5 + y * 12))));
+  lump(b, 0.034, -0.02, -0.022, 0.024, 0.02, 0.03, 1, 62, 0.003, () => mulCol(WOOL, 0.84));                              // the thumb, wrapped under
+  tube(b, [[0, 0.006, 0.03, 0.037], [0, 0.014, 0.07, 0.036], [0, 0.022, 0.098, 0.039], [0, 0.03, 0.135, 0.042]], 9,
+    (i) => (i >= 2 ? mulCol(RED, 0.9) : mulCol(WOOL, 0.9)), null, false);
+  return b.build({ uv: false, bend: false });
 }

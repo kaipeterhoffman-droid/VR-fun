@@ -49,7 +49,7 @@ const NORMAL_FRAG = /* glsl */`
     float l = texture(tState, vUv - vec2(uTexel, 0.0)).r, r = texture(tState, vUv + vec2(uTexel, 0.0)).r;
     float d = texture(tState, vUv - vec2(0.0, uTexel)).r, u = texture(tState, vUv + vec2(0.0, uTexel)).r;
     vec2 slope = vec2(r - l, u - d) * 1.6;
-    float stir = clamp(abs(c.r) * 2.2 + abs(c.r - c.g) * 26.0, 0.0, 1.0);
+    float stir = clamp(abs(c.r - c.g) * 22.0 + abs(c.r) * 0.35, 0.0, 1.0);        // water that is moving now, far more than water that merely stands high
     vec2 e = smoothstep(vec2(0.0), vec2(0.1), vUv) * smoothstep(vec2(0.0), vec2(0.1), 1.0 - vUv);
     o = vec4(clamp(slope * e.x * e.y * 0.5 + 0.5, 0.0, 1.0), stir * e.x * e.y, 1.0);
   }
@@ -152,7 +152,7 @@ const FRAG = /* glsl */`
     float cosT = max(dot(N, V), 0.0);
     float F = uWaterP.y + (1.0 - uWaterP.y) * pow(1.0 - cosT, 4.0);
     vec3 R = reflect(-V, N); R.y = abs(R.y) + 0.015; R = normalize(R);
-    float broken = clamp(length(slope) * 4.2 * uWaterP.z, 0.0, 0.88);       // how far this piece of water is from a mirror
+    float broken = clamp(length(slope) * 4.2 * uWaterP.z + stir * 0.35, 0.0, 0.88);       // how far this piece of water is from a mirror
     float m = 1.0 - broken;
     vec3 sky = skyClouded(R);
     float mh = dot(R, uMoonDir), mr = uSkyP.z;
@@ -174,7 +174,9 @@ const FRAG = /* glsl */`
     }
     c += flame(vWPos, N, V, uLanternPos, uLanternColor, uLanternRadius);
     for (int i = 0; i < ${MAX_LIGHTS}; i++) c += flame(vWPos, N, V, uLights[i].xyz, uLightColors[i], uLights[i].w);
-    c += uTouch * stir * (0.25 + 0.75 * near);
+    // turned water takes the lantern's colour only where the lantern reaches it; further off it is merely less of a mirror
+    float reach = 1.0 - smoothstep(uLanternRadius * 0.2, uLanternRadius * 2.0, length(uLanternPos - vWPos));
+    c += uTouch * (stir * stir) * (reach * reach);
     float fog = fogAmount(0.0, dist, 1.0);
     c = mix(c, fogTint(-V, 0.0), fog);
     float keep = F * m * (1.0 - fog);
