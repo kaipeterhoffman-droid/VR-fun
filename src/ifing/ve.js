@@ -172,10 +172,14 @@ function gate(ctx) {
     const m = new THREE.Mesh(b.build({ uv: false, bend: false }), ctx.mats.plain); m.name = 'raven'; m.position.copy(at(h[0], h[1], h[2])); m.rotation.y = yaw0 + (i ? -0.5 : 0.4);
     return { m, twin: ctx.world.add(m, S, i ? 'only' : true), yaw: m.rotation.y, want: m.rotation.y, next: 0 };
   });
-  const mid = at(0, 1, 0);
+  const mid = at(0, 1, 0), far = at(-40, 60, -420); let hailed = false, spoken = false;
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const d = Math.hypot(eye.x - mid.x, eye.z - mid.z);
-    if (d > 150) return;
+    if (d > 150) { hailed = spoken = false; return; }
+    // the raven says what it thinks of a lantern; and from a long way down the river, as the canoe comes under the
+    // gate, somebody who has been watching the water sounds a horn once
+    if (!spoken && d < 30 && !boat.frozen) { spoken = true; ctx.hit('croak', birds[0].m.position); }
+    if (!hailed && boat.s > S - 3 && boat.s < S + 30 && !boat.frozen) { hailed = true; ctx.hit('horn', far); }
     // the runes take light as the lantern comes: first one post, then the other
     [smooth(46, 12, d), smooth(38, 9, d)].forEach((k, i) => { const v = 0.1 + 1.9 * k * (0.86 + 0.14 * Math.sin(time * 1.7 + i * 2)); lit[i].userData.set(v); glows[i].power = 0.26 * k; });
     for (const b of birds) {
@@ -277,11 +281,13 @@ function stoneShip(ctx) {
   const mid = V3(0, 0, 0).applyMatrix4(F), sternAt = V3(0.6, 3.4, L / 2 + 3.1).applyMatrix4(F);
   const cold = { position: sternAt, color: new THREE.Color('#8fc0ff'), radius: 7, intensity: 0 }; ctx.lights.push(cold);                   // what the runes give off falls on the stone they are cut in
   let wake = 0;
+  const crew = ctx.voice('ship', mid, 95, true);
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const d = Math.hypot(eye.x - mid.x, eye.z - mid.z);
-    if (d > 320) { for (const l of lamps) l.core.power = l.halo.power = 0; ghost.update(); return; }
+    if (d > 320) { for (const l of lamps) l.core.power = l.halo.power = 0; crew.level = 0; ghost.update(); return; }
     const to = smooth(86, 30, d); wake += (to - wake) * Math.min(1, dt * 0.6); if (boat.frozen) wake = to;
     for (const l of lamps) { l.core.power = (0.55 + 0.9 * wake) * l.k; l.halo.power = (0.12 + 0.3 * wake) * l.k; }
+    crew.level = wake * wake;                                                  // and her crew can be heard at the oars, though not from above the water
     shipWood.uniforms.uEmissive.value.copy(GLOW).multiplyScalar(0.35 + 1.1 * wake); cloth.uniforms.uEmissive.value.copy(GLOW2).multiplyScalar(0.35 + 1.1 * wake);     // she comes up in the water as one comes alongside
     dew.userData.uniforms.uMoteP.value.x = 0.2 + 0.9 * wake;
     const rk = smooth(64, 16, Math.hypot(eye.x - sternAt.x, eye.z - sternAt.z)); lit.userData.set(0.25 + 1.6 * rk); cold.intensity = 0.25 + 0.75 * rk;

@@ -145,11 +145,14 @@ function tree(ctx, forest) {
   ctx.lights.push(web, foot);
   const halos = [[-6, 25, 2, 30, 0.07], [-16, 17, 2, 24, 0.07], [2, 34, 0, 26, 0.06], [-26, 20, 4, 20, 0.05], [XC, 5, ZL, 13, 0.1]].map(([x, y, z, size, power]) => ctx.glows.add({ position: at(x, y, z), size, color: new THREE.Color('#ffb030'), power }));
   const here = at(XC, 0, ZL);
+  ctx.voice('gold', at(-8, 24, 2), 150, true).level = 1;                      // the leaves are gold, and sound like it
+  const strings = ctx.voice('loom', at(XC, 4, ZL), 60);
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const on = boat.s > 556 && boat.s < 880; grp.visible = on; if (twin) twin.visible = on;
     if (!on) return;
     const d = Math.hypot(eye.x - here.x, eye.z - here.z), near = smooth(34, 5, d), breath = 0.9 + 0.1 * Math.sin(time * 0.7);
     warp.userData.uniforms.uThreadGain.value.x = (0.7 + 0.8 * near) * breath;                 // the warp brightens as the canoe comes to it
+    strings.level = boat.frozen ? 0 : near;
     web.intensity = (0.75 + 0.5 * near) * breath; halos[4].power = (0.08 + 0.1 * near) * breath;
   });
 }
@@ -209,7 +212,7 @@ function stag(ctx) {
     for (const d of drops) {
       const u = (time * 0.42 + d.ph) % 1, fall = Math.min(1, u * 2.2), y = d.t.y * (1 - fall * fall);
       d.glow.position.set(d.t.x, Math.max(0.02, y), d.t.z); d.glow.power = fall < 1 ? 0.9 : 0;
-      if (fall >= 1 && d.last < 1 && dist < 60 && ctx.water.ripples.touch) ctx.water.ripples.touch(d.t.x, d.t.z, 0.12, 0.35);
+      if (fall >= 1 && d.last < 1 && dist < 60 && ctx.water.ripples.touch) { ctx.water.ripples.touch(d.t.x, d.t.z, 0.12, 0.35); ctx.hit('drop', { x: d.t.x, y: 0, z: d.t.z }, 0.8); }
       d.last = fall;
     }
   });

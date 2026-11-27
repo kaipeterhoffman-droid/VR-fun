@@ -165,7 +165,7 @@ function nokk(ctx, forest) {
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const dx = eye.x - home.x, dz = eye.z - home.z, d = Math.hypot(dx, dz) || 1;
     if (d > 120) { eyes[0].power = eyes[1].power = 0; return; }
-    if (!gone && d < 10) { gone = true; since = 0; ctx.water.ripples.touch(home.x, home.z, 0.42, -0.9); }
+    if (!gone && d < 10) { gone = true; since = 0; ctx.water.ripples.touch(home.x, home.z, 0.42, -0.9); ctx.hit('plunge', home); }
     if (gone) { const before = since; since += dt; if (before < 0.45 && since >= 0.45) ctx.water.ripples.touch(home.x, home.z, 0.3, 0.7); if (since > 14 && d > 32) gone = false; }
     under += ((gone ? 1 : 0) - under) * Math.min(1, dt * (gone ? 3.2 : 0.4));
     head.position.y = -0.36 * under;
@@ -294,16 +294,19 @@ function jotun(ctx, forest) {
   // ---- the eye
   const eyeAt = at(4.7, 29.15, 17.0), right = V3(1, 0, 0).transformDirection(G), fwd = V3(0, 0, 1).transformDirection(G), headAt = at(0.6, 28, 8.5);
   const pupil = ctx.glows.add({ position: eyeAt.clone(), size: 0.85, color: new THREE.Color('#d2fff0'), power: 0 }), halo = ctx.glows.add({ position: eyeAt.clone(), size: 5.2, color: new THREE.Color('#7fd8c0'), power: 0 });
-  let open = 0;
-  const v = V3();
+  let open = 0, spoke = false;
+  const v = V3(), breath = ctx.voice('breath', headAt, 170, true);
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const seen = boat.s > 140 && boat.s < 440;
     for (const p of pieces) p.visible = seen; for (const t of twins) t.visible = seen;
-    if (!seen) { pupil.power = halo.power = 0; return; }
+    if (!seen) { pupil.power = halo.power = breath.level = 0; return; }
     const d = v.copy(eye).sub(headAt).length();
     // he wakes to a light on the river, slowly, and loses interest in what has gone by
     const want = smooth(128, 84, d) * (v.dot(fwd) > -14 ? 1 : 0);
     open += (want - open) * (boat.frozen ? 1 : Math.min(1, dt * (want > open ? 0.4 : 0.8)));
+    // he is heard before he is seen: asleep he breathes, and the waking of him is stone moving
+    breath.level = 0.45 + 0.55 * open;
+    if (!spoke && open > 0.3 && want > open && !boat.frozen) { spoke = true; ctx.hit('groan', headAt); } else if (open < 0.08) spoke = false;
     const blink = 1 - smooth(0.965, 0.99, Math.sin(time * 0.37 + 1.2) * Math.sin(time * 0.11));
     // the eye follows the canoe: a hand's breadth (his hand) is all it can move in its hollow
     v.normalize();

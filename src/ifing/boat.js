@@ -68,7 +68,7 @@ export class Boat {
     this.frozen = false; this.hold = 0;                                     // hold: 1 = the river lets her go no further
     this.seat = { x: 0, y: 1.15, z: 0, yaw: 0, set: false };
     this.view = { yaw: 0, pitch: 0 };                                       // looking about with the mouse, outside the headset
-    this.sound = { swish: 0, splash: 0, bump: 0, speed: 0, drip: 0 };       // what the ear should be told (src/ifing/audio.js)
+    this.sound = { swish: 0, splash: 0, bump: 0, speed: 0, flow: 0, hits: [] };      // what the ear should be told (src/ifing/audio.js): hits are [what, which oar, how hard], this frame's only
     this.stats = { strokes: 0, distance: 0 }; this.asked = [0, 0, 0];
 
     // the hands: a mitten for each, which closes on the oar of its own side
@@ -182,7 +182,7 @@ export class Boat {
 
   /** dt: the frame; look: the reach's colours (for the lantern); input: { drive, steer } from keys or a thumbstick. */
   update(dt, time, look) {
-    const snd = this.sound; snd.splash = 0; snd.bump = Math.max(0, snd.bump - dt * 4);
+    const snd = this.sound; snd.splash = 0; snd.hits.length = 0; snd.bump = Math.max(0, snd.bump - dt * 4);
     if (this.frozen) { this.sync(dt, time); this.light(look, time); return; }
     // ---- what is asked of her by keys or thumbstick
     let drive = 0, steer = 0; const K = this.keys;
@@ -212,7 +212,7 @@ export class Boat {
         // trailing: no work is done, but it marks the water as she moves
         for (const sm of o.samples) sm.has = false;
         v1.copy(o.G).addScaledVector(o.A, Lo - Lb * 0.4);
-        if (v1.y < 0.03 && o.inWater <= 0.3) { snd.splash = Math.max(snd.splash, 0.3); this.water.ripples.touch(v1.x, v1.z, 0.24, 0.4); }
+        if (v1.y < 0.03 && o.inWater <= 0.3) { snd.splash = Math.max(snd.splash, 0.3); snd.hits.push(['touch', n, 0.25]); this.water.ripples.touch(v1.x, v1.z, 0.24, 0.4); }
         o.inWater = v1.y < 0.03 ? 1 : 0; o.force = 0;
         const sp = Math.hypot(this.u - cur, this.w); if (o.inWater && sp > 0.15) this.water.ripples.touch(v1.x, v1.z, 0.16, clamp(sp * 0.03, 0, 0.08));
         continue;
@@ -235,10 +235,10 @@ export class Boat {
       }
       // going in, coming out, the drops that fall from the blade after, and what the hand is told of it
       v1.copy(o.G).addScaledVector(o.A, Lo - Lb * 0.3);
-      if (sub > 0.3 && o.inWater <= 0.3) { snd.splash = Math.max(snd.splash, clamp(0.25 + speed * 0.3, 0, 1)); this.water.ripples.touch(v1.x, v1.z, 0.26, 0.5); this.stats.strokes++; if (o.hand) this.pulse(o.hand, 0.5, 35); }
+      if (sub > 0.3 && o.inWater <= 0.3) { const hard = clamp(0.25 + speed * 0.3, 0, 1); snd.splash = Math.max(snd.splash, hard); snd.hits.push(['splash', n, hard]); this.water.ripples.touch(v1.x, v1.z, 0.26, 0.5); this.stats.strokes++; if (o.hand) this.pulse(o.hand, 0.5, 35); }
       if (sub > 0.3) o.wet = 1; else if (o.wet > 0) {
         o.wet = Math.max(0, o.wet - dt * 0.45); o.dripClock -= dt;
-        if (o.dripClock <= 0 && v1.y < 0.9) { o.dripClock = 0.07 + (1 - o.wet) * 0.3; this.water.ripples.touch(o.tip.x, o.tip.z, 0.07, 0.16 * o.wet); snd.drip = o.wet; }
+        if (o.dripClock <= 0 && v1.y < 0.9) { o.dripClock = 0.07 + (1 - o.wet) * 0.3; this.water.ripples.touch(o.tip.x, o.tip.z, 0.07, 0.16 * o.wet); snd.hits.push(['drip', n, o.wet]); }
       }
       if (o.hand && fo > 0.25) { o.hand.buzz -= dt; if (o.hand.buzz <= 0) { o.hand.buzz = 0.05; this.pulse(o.hand, 0.08 + fo * 0.14, 45); } }
       o.inWater = sub; o.force = fo; subs[n] = sub; swish = Math.max(swish, clamp(sub * speed * 0.45, 0, 1));
@@ -291,7 +291,7 @@ export class Boat {
       this.water.ripples.touch(this.pos.x + fwd.x * -bz + right.x * j, this.pos.y + fwd.z * -bz + right.z * j, 0.22, k);
       this.water.ripples.touch(this.pos.x + fwd.x * -sz - right.x * j, this.pos.y + fwd.z * -sz - right.z * j, 0.24, -k * 0.7);
     }
-    snd.speed = spd;
+    snd.speed = spd; snd.flow = cur;
     this.sync(dt, time); this.light(look, time);
   }
 

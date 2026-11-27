@@ -15,6 +15,8 @@ A kilometre of river through a forest out of the old North, at night, in a small
 
 The river carries you by itself: do nothing and you float the whole way in a little under half an hour. To row, reach forward and take an oar in each hand with the grip or the trigger, dip the blades and push them away from you (you face the way she goes, so a push drives her on and a pull backs her). Row one side to turn. Let go and the oars trail beside her.
 
+There is sound from the moment you press the button, and it is made the way the pictures are. Water is a crowd of bubbles, each ringing at the pitch its size gives it; the catch of an oar, the hearth, an owl in the wood, a horn a long way off and the giant turning over are all worked out as numbers while the page loads. Each reach holds one low chord, which opens when something great is near. `M` mutes it, and `?quiet` starts silent.
+
 On a desktop, drag to look and use the arrow keys to row. Add `?from=370` to the address to set off just above the gatehouse, or `?from=640` at the head of the golden grove.
 
 ## Trick Shot (two players, one headset)

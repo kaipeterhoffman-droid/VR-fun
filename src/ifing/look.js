@@ -121,7 +121,8 @@ export function lookAt(s, out) {
   let i = 1;
   while (i < STOPS.length - 1 && s > STOPS[i][0]) i++;
   const [s0, n0] = STOPS[i - 1], [s1, n1] = STOPS[i];
-  mixLook(out, LOOKS[n0], LOOKS[n1], n0 === n1 ? 0 : smooth(s0, s1, s));
+  out.from = n0; out.to = n1; out.blend = n0 === n1 ? 0 : smooth(s0, s1, s);                  // (which reaches these are: the ear wants to know too)
+  mixLook(out, LOOKS[n0], LOOKS[n1], out.blend);
   let bank = 0;
   for (const [c, half, k] of BANKS) { const u = Math.abs(s - c) / half; if (u < 1) bank += k * (1 - u * u) * (1 - u * u); }
   out.bank = bank;

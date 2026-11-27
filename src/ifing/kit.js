@@ -179,8 +179,9 @@ export function fire(ctx, stone, wood, pos, s, size = 1, mirror = true) {
   ctx.lights.push(light);
   const core = ctx.glows.add({ position: at, size: 0.75 * size, color: new THREE.Color('#ffc070'), power: 1.0, flicker: 0.5 });
   const halo = ctx.glows.add({ position: new THREE.Vector3(pos.x, pos.y + 0.9 * size, pos.z), size: 3.4 * size, color: new THREE.Color('#ff7a2a'), power: 0.32, flicker: 0.3 });
-  const h = { light, power: 1, flames: fl, sparks: sp, at };
+  const h = { light, power: 1, flames: fl, sparks: sp, at }, voice = ctx.voice('fire', at, 34 * size);
   ctx.ticks.push((dt, time) => {
+    voice.level = h.power;
     const f = (0.84 + 0.1 * Math.sin(time * 9.1 + ph) * Math.sin(time * 5.7 + ph * 2) + 0.06 * Math.sin(time * 17.3 + ph)) * h.power;
     light.intensity = 1.5 * f; core.power = 1.0 * f; halo.power = 0.32 * f; fl.visible = sp.visible = h.power > 0.02;
   });
