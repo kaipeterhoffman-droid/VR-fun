@@ -11,7 +11,7 @@
 // Every level here was set by measurement (each layer rendered alone and metered), not by ear: see K.
 import { composeSounds, SR } from './sounds.js';
 import { river } from './river.js';
-import { clamp, smooth, rng } from './noise.js';
+import { clamp, smooth, rng, gustAt } from './noise.js';
 
 const TAU = Math.PI * 2;
 const NOTE = { D2: 73.42, A2: 110, D3: 146.83, F3: 174.61, Fs3: 185, A3: 220, D4: 293.66, E4: 329.63, Fs4: 369.99, A4: 440, B4: 493.88, E5: 659.26 };
@@ -31,10 +31,10 @@ export const K = {
   swish: 0.5, oarBubbles: 0.22, splash: 0.34, thunk: 0.1, drip: 0.1, bump: 0.5,
   tone: 0.022, lyre: 0.1, owl: 0.1, touch: 0.07,
   fire: 1.15, breath: 1.3, gold: 0.6, goldBed: 0.14, ship: 0.38, pluck: 0.26,
-  plunge: 0.6, drop: 0.22, groan: 0.5, horn: 0.14, croak: 0.15, fish: 0.2, launch: 0.3, wing: 0.4,
+  gust: 0.32, plunge: 0.6, drop: 0.22, groan: 0.5, horn: 0.14, croak: 0.15, fish: 0.2, launch: 0.3, wing: 0.4,
 };
 /** The notes a lyre may pick, as speeds of the one string that was made (which is D): cold fifths for the mere, and the well's own. */
-const SCALE = { ve: [0.749, 0.8409, 1, 1.1225, 1.4983], well: [0.5, 0.749, 1, 1.26, 1.4983, 2], loom: [1, 1.1225, 1.26, 1.4983, 1.6818, 2, 2.2449] };
+const SCALE = { ve: [0.749, 0.8409, 1, 1.1225, 1.4983], well: [0.5, 0.749, 1, 1.26, 1.4983, 2] };
 
 let T = 0;                                                           // the desk's clock, read once a frame
 function aim(p, v, tau = 0.08) {                                    // lean a knob toward a value, unless it is there already
@@ -153,13 +153,15 @@ export class Sound {
     // ---- which reach this is, and how much of the next
     const a = REACH[look.from] || REACH.naust, b = REACH[look.to] || a, t = look.blend || 0, mix = (k) => a[k] + (b[k] - a[k]) * t;
     const snd = boat.sound, water = mix('water'), flow = snd.flow === undefined ? 0.5 : snd.flow, wind = look.wind, way = clamp(snd.speed / 1.6);
-    const gust = (ph) => clamp(0.5 + 0.3 * Math.sin(time * 0.23 + ph) + 0.22 * Math.sin(time * 0.57 + ph * 2.1) + 0.14 * Math.sin(time * 1.31 + ph * 0.7), 0, 1.2);
+    const gust = (ph) => gustAt(time, ph), blow = stage ? stage.gust || 0 : 0;      // the wind as it goes on; and a front of it arriving (a giant's breath)
+    this.time = time;
 
     // ---- the bed
     this.river.forEach((g) => aim(g.gain, K.river * water * (0.4 + 0.6 * flow), 0.6));
     this.banks.forEach((g, i) => aim(g.gain, K.banks * water * (0.25 + 0.75 * flow) * (0.7 + 0.3 * Math.sin(time * 0.13 + i * 2.1)), 0.8));
-    this.wind.forEach((w, i) => { const g = gust(i * 1.9); aim(w.g.gain, K.wind * wind * (0.25 + 0.75 * g), 0.4); aim(w.f.frequency, 380 + 420 * g + 60 * Math.sin(time * 0.9 + i), 0.4); });
-    this.needles.forEach((g, i) => aim(g.gain, K.needles * wind * mix('needles') * (0.2 + 0.8 * gust(i * 1.9 + 0.4)), 0.4));
+    // (what sways is moved by gust(3): the two ears hear it a little before and a little after)
+    this.wind.forEach((w, i) => { const g = gust(2.6 + i * 0.8); aim(w.g.gain, K.wind * wind * (0.25 + 0.75 * g) + K.gust * blow, 0.18); aim(w.f.frequency, 380 + 420 * g + 60 * Math.sin(time * 0.9 + i) + 260 * blow, 0.25); });
+    this.needles.forEach((g, i) => aim(g.gain, K.needles * (wind * mix('needles') * (0.2 + 0.8 * gust(2.8 + i * 0.4)) + 0.5 * blow), 0.3));
     aim(this.wet.gain, K.room * mix('room'), 1);
 
     // ---- the hull
@@ -253,19 +255,8 @@ const VOICES = {
   },
   /** The ship the mere keeps: her crew at the oars, heard as if through the water. */
   ship(A, v) {
-    const p = A.place(v.pos, A.far.in), g = A.G(0, p), s = A.loop('crew', g);
+    const p = A.place(v.pos, A.far.in), g = A.G(0, p), s = A.loop('crew', g, 1, A.time || 0);      // (begun where the clock is, so that the light that runs her length keeps the stroke: src/ifing/ve.js)
     return { tick: (k) => aim(g.gain, K.ship * k, 0.6), end: () => { s.stop(); p.disconnect(); } };
-  },
-  /** The loom: as the canoe comes to it the warp is sounded, a thread at a time, upward. */
-  loom(A, v) {
-    let done = 0;
-    return {
-      tick: (k, time, d) => {
-        const near = v.level; if (near < 0.04) done = 0;
-        if (done < SCALE.loom.length && near > (done + 1) / (SCALE.loom.length + 1)) { A.say('pluck', { at: v.pos, to: A.far.in, gain: K.pluck * (0.7 + 0.3 * A.rnd()), rate: SCALE.loom[done] }); done++; }
-      },
-      end: () => {},
-    };
   },
 };
 
@@ -275,6 +266,7 @@ const HITS = {
   drop: { reach: 40, say: (A, h, k, rnd) => A.say('drop' + Math.floor(rnd() * 3), { at: h, gain: K.drop * k, rate: 0.8 + 0.4 * rnd() }) },
   groan: { reach: 260, say: (A, h) => A.say('groan', { at: h, to: A.far.in, gain: K.groan }) },
   horn: { reach: 1e9, say: (A, h) => A.say('horn', { at: h, to: A.far.in, gain: K.horn }) },
+  string: { reach: 260, say: (A, h, k) => A.say('pluck', { at: h, to: A.far.in, gain: K.pluck * Math.min(1, k * 2.5), rate: h.note }) },      // a stone on the mere, a thread of the loom
   fish: { reach: 30, say: (A, h, k, rnd) => A.say('drop' + Math.floor(rnd() * 3), { at: h, gain: K.fish * Math.min(1, k * 2.5), rate: 0.5 + 0.2 * rnd(), near: true }) },
   launch: { reach: 60, say: (A, h, k, rnd) => A.say('splash' + Math.floor(rnd() * 4), { at: h, gain: K.launch * Math.min(1, k * 2.5), rate: 0.8 }) },
   wing: { reach: 70, say: (A, h, k, rnd) => A.say('flap' + Math.floor(rnd() * 2), { at: h, gain: K.wing * Math.min(1, k * 4), rate: 0.9 + 0.2 * rnd() }) },

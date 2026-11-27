@@ -12,7 +12,7 @@
 // else calls touch() push it, and the rings travel. Where the water has been touched it glints gold: the old poets'
 // name for gold was "fire of the river".
 import * as THREE from 'three';
-import { GLSL_FINISH, shared, MAX_LIGHTS } from './paint.js';
+import { GLSL_FINISH, GLSL_FRONT, shared, MAX_LIGHTS } from './paint.js';
 import { GLSL_SKY, skyShared } from './sky.js';
 import { waveTile } from './art.js';
 import { river, LENGTH } from './river.js';
@@ -126,6 +126,7 @@ const VERT = /* glsl */`
 const FRAG = /* glsl */`
   ${GLSL_FINISH}
   ${GLSL_SKY}
+  ${GLSL_FRONT}
   uniform vec3 uDeep, uTouch; uniform vec4 uWaterP, uRippleRect;
   uniform sampler2D tWave, tRipple;
   uniform vec3 uLanternPos, uLanternColor; uniform float uLanternRadius;
@@ -148,11 +149,15 @@ const FRAG = /* glsl */`
     float stir = 0.0;
     vec2 ru = (p - uRippleRect.xy) * uRippleRect.z + 0.5;
     if (uRippleRect.w > 0.5 && ru.x > 0.0 && ru.x < 1.0 && ru.y > 0.0 && ru.y < 1.0) { vec4 rp = texture2D(tRipple, ru); slope += (rp.rg - 0.5) * 2.0; stir = rp.b; }
+    // a front going over: a cat's-paw. The water under it is ruffled fine and stops being a mirror, so that a pale
+    // band crosses the dark of the river
+    float fr = uFrontP.y + uFrontP.z > 0.0 ? frontAt(vWPos) : 0.0, paw = min(fr * uFrontP.y * 0.22, 1.0);
+    if (paw > 0.01) { slope += (texture2D(tWave, p * 0.61 + vec2(0.09, -0.07) * uTime).rg - 0.5) * (1.5 * paw); }
     vec3 N = normalize(vec3(-slope.x, 1.0, -slope.y));
     float cosT = max(dot(N, V), 0.0);
     float F = uWaterP.y + (1.0 - uWaterP.y) * pow(1.0 - cosT, 4.0);
     vec3 R = reflect(-V, N); R.y = abs(R.y) + 0.015; R = normalize(R);
-    float broken = clamp(length(slope) * 4.2 * uWaterP.z + stir * 0.35, 0.0, 0.88);       // how far this piece of water is from a mirror
+    float broken = clamp(length(slope) * 4.2 * uWaterP.z + stir * 0.35 + paw * 0.3, 0.0, 0.88);       // how far this piece of water is from a mirror
     float m = 1.0 - broken;
     vec3 sky = skyClouded(R);
     float mh = dot(R, uMoonDir), mr = uSkyP.z;
@@ -174,6 +179,7 @@ const FRAG = /* glsl */`
       float road = (1.0 - smoothstep(0.015, 0.1, abs(ang) + d2 * 0.1)) * smoothstep(2.5, 9.0, along);
       c += uMoonColor * road * (0.1 + 0.9 * smoothstep(-0.02, 0.07, d1 + d2)) * 0.5;
     }
+    c += uFrontColor * (fr * uFrontP.z * 0.22 * smoothstep(0.5, 3.0, uFrontP.x));      // and a front of light lies on the water as it goes (a broad one: a shuttle's does not)
     c += flame(vWPos, N, V, uLanternPos, uLanternColor, uLanternRadius);
     for (int i = 0; i < ${MAX_LIGHTS}; i++) c += flame(vWPos, N, V, uLights[i].xyz, uLightColors[i], uLights[i].w);
     // turned water takes the lantern's colour only where the lantern reaches it; further off it is merely less of a mirror

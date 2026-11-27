@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { Builder, mulCol } from './build.js';
 import { tube } from './flora.js';
 import { river } from './river.js';
-import { BARK_U, barkSheet, region } from './art.js';
+import { BARK_U, barkSheet, region, breathPuff } from './art.js';
 import { makePaint } from './paint.js';
 import { rng, fbm2, smooth } from './noise.js';
 import { makeMist, makeMotes } from './fx.js';
@@ -296,6 +296,15 @@ function jotun(ctx, forest) {
   const pupil = ctx.glows.add({ position: eyeAt.clone(), size: 0.85, color: new THREE.Color('#d2fff0'), power: 0 }), halo = ctx.glows.add({ position: eyeAt.clone(), size: 5.2, color: new THREE.Color('#7fd8c0'), power: 0 });
   let open = 0, spoke = false;
   const v = V3(), breath = ctx.voice('breath', headAt, 170, true);
+  // ---- his breath. Each time he lets it go it comes down off his lip, crosses the pool and goes on into the wood on
+  // the far side: mist that is only there while it passes, the water ruffled under it, every bough leaning away
+  const mouth = at(0.8, 19.3, 19.8), puffs = [], down = V3(0, -0.76, 0.65).normalize(), COLD_AIR = new THREE.Color('#c4ecdf');
+  for (let k = 0; k < 11; k++) { const D = 3.5 + k * 2.0, p = at(0.8 + down.x * D + (rnd() - 0.5) * 2.4, 19.3 + down.y * D + (rnd() - 0.5) * 1.2, 19.8 + down.z * D); puffs.push({ x: p.x, y: p.y, z: p.z, width: 3.4 + k * 0.5, height: 3.2 + k * 0.22, opacity: 0.85, drift: 0.3 }); }
+  for (let k = 0; k < 18; k++) {
+    const D = 25 + k * 1.9 + rnd() * 1.5, r = Math.sqrt(D * D - 18.2 * 18.2), a = ((k * 0.618) % 1 - 0.5) * 1.0, p = at(0.8 + Math.sin(a) * r, 1.3 + rnd() * 0.8, 19.8 + Math.cos(a) * r);
+    puffs.push({ x: p.x, y: p.y, z: p.z, width: 5.5 + rnd() * 3.5, height: 2.3 + rnd() * 1.2, opacity: 0.5 - k * 0.014, drift: 0.3 });
+  }
+  const sigh = makeMist(puffs, { front: [1, 0, 1.8], puff: breathPuff() }); sigh.name = 'his breath'; ctx.world.add(sigh, null, false); pieces.push(sigh);
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const seen = boat.s > 140 && boat.s < 440;
     for (const p of pieces) p.visible = seen; for (const t of twins) t.visible = seen;
@@ -306,6 +315,8 @@ function jotun(ctx, forest) {
     open += (want - open) * (boat.frozen ? 1 : Math.min(1, dt * (want > open ? 0.4 : 0.8)));
     // he is heard before he is seen: asleep he breathes, and the waking of him is stone moving
     breath.level = 0.45 + 0.55 * open;
+    // (the same clock he is heard by, in src/ifing/audio.js: he lets go at 0.44 of each 7.2 seconds)
+    if (d < 170) { const R = (((time / 7.2) % 1 + 0.56) % 1) * 7.2 * 7, k = (0.5 + 0.5 * open) * smooth(2, 8, R) * (1 - smooth(36, 50, R)); ctx.front(mouth, R, 4.6, 5.5 * k, 0.55 * k, COLD_AIR); }
     if (!spoke && open > 0.3 && want > open && !boat.frozen) { spoke = true; ctx.hit('groan', headAt); } else if (open < 0.08) spoke = false;
     const blink = 1 - smooth(0.965, 0.99, Math.sin(time * 0.37 + 1.2) * Math.sin(time * 0.11));
     // the eye follows the canoe: a hand's breadth (his hand) is all it can move in its hollow

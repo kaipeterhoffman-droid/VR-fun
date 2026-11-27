@@ -7,7 +7,7 @@
 //   Mist     torn pieces of fog lying on the water.
 //   Leaves   red-gold leaves coming down in the grove.
 import * as THREE from 'three';
-import { GLSL_FINISH, shared } from './paint.js';
+import { GLSL_FINISH, GLSL_FRONT, shared } from './paint.js';
 import { glowDisc, mistPuff, region } from './art.js';
 import { skyShared } from './sky.js';
 
@@ -146,23 +146,27 @@ export function makeMotes(motes, { mirror = true } = {}) {
 // ------------------------------------------------------------------------------------------------ mist
 const MIST_VERT = /* glsl */`
   attribute vec4 aPlace; attribute vec4 aLook;                   // xyz + width; height, opacity, drift speed, phase
-  uniform float uTime;
-  varying vec2 vUv; varying float vA; varying float vDist; varying vec3 vW;
+  uniform float uTime; uniform vec3 uMistFront;                   // how much a front adds to it; how much of it is there with no front at all; how much of the front's light it takes
+  ${GLSL_FRONT}
+  varying vec2 vUv; varying float vA; varying float vDist; varying vec3 vW; varying float vFr;
   void main() {
     vec3 c = aPlace.xyz; c.x += sin(uTime * 0.05 * aLook.z + aLook.w * 6.28) * 2.5; c.z += cos(uTime * 0.04 * aLook.z + aLook.w * 4.0) * 2.5;
     vec4 wp = modelMatrix * vec4(c, 1.0);
+    vFr = uFrontP.y + uFrontP.z > 0.0 ? frontAt(wp.xyz) : 0.0;
+    vec2 away = wp.xz - uFront.xz; wp.xz += away / max(length(away), 0.5) * (vFr * uFrontP.y * 0.3);          // a front shoulders it aside
     vec4 mv = viewMatrix * wp;
     vDist = length(mv.xyz);
     mv.x += position.x * aPlace.w; mv.y += position.y * aLook.x;
     vUv = position.xy * 0.5 + 0.5; vW = wp.xyz;
-    vA = aLook.y * smoothstep(1.5, 9.0, vDist) * (1.0 - smoothstep(60.0, 150.0, vDist));     // it parts before the boat, and is lost in the air far off
+    vA = aLook.y * (uMistFront.y + min(vFr * uFrontP.y, 1.0) * uMistFront.x) * smoothstep(1.5, 9.0, vDist) * (1.0 - smoothstep(60.0, 150.0, vDist));     // it parts before the boat, and is lost in the air far off
     gl_Position = projectionMatrix * mv;
   }
 `;
 const MIST_FRAG = /* glsl */`
   ${GLSL_FINISH}
   uniform sampler2D tPuff; uniform vec3 uLanternPos, uLanternColor; uniform float uLanternRadius; uniform float uMistGain;
-  varying vec2 vUv; varying float vA; varying float vDist; varying vec3 vW;
+  uniform vec4 uFrontP; uniform vec3 uFrontColor, uMistFront;
+  varying vec2 vUv; varying float vA; varying float vDist; varying vec3 vW; varying float vFr;
   void main() {
     float a = texture2D(tPuff, vUv).a * vA * uMistGain;
     if (a < 0.004) discard;
@@ -170,17 +174,18 @@ const MIST_FRAG = /* glsl */`
     vec3 c = fogTint(V, 0.0) * 1.15 + uMistColor * 0.25;
     float ld = length(uLanternPos - vW); float la = 1.0 - smoothstep(0.0, uLanternRadius * 1.6, ld);
     c += uLanternColor * la * la * 0.22;                           // the lantern makes a room of light in the mist
+    c += uFrontColor * (vFr * uFrontP.z * uMistFront.z);           // and a front of light shows in it as it goes through
     vec4 o = develop(c, 1.0);
     gl_FragColor = vec4(o.rgb, a * (1.0 - uVeil));
   }
 `;
-/** puffs: [{ x, y, z, width, height, opacity, drift }] */
-export function makeMist(puffs) {
+/** puffs: [{ x, y, z, width, height, opacity, drift }]. front: [how much a passing front thickens it, how much is there without one, how much of its light it takes]. */
+export function makeMist(puffs, { front = [0.25, 1, 0.5], puff = null } = {}) {
   const n = puffs.length, g = quad(), place = new Float32Array(n * 4), look = new Float32Array(n * 4);
   puffs.forEach((p, i) => { place.set([p.x, p.y, p.z, p.width], i * 4); look.set([p.height, p.opacity ?? 0.5, p.drift ?? 1, (i * 0.37) % 1], i * 4); });
   g.setAttribute('aPlace', new THREE.InstancedBufferAttribute(place, 4)); g.setAttribute('aLook', new THREE.InstancedBufferAttribute(look, 4));
   g.instanceCount = n;
-  const uniforms = { ...shared, tPuff: { value: makeMist.puff || (makeMist.puff = mistPuff()) }, uMistGain: { value: 1 } };
+  const uniforms = { ...shared, tPuff: { value: puff || makeMist.puff || (makeMist.puff = mistPuff()) }, uMistGain: { value: 1 }, uMistFront: { value: new THREE.Vector3(front[0], front[1], front[2] ?? 0.5) } };
   const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: MIST_VERT, fragmentShader: MIST_FRAG, transparent: true, depthWrite: false });
   const mesh = new THREE.Mesh(g, mat); mesh.frustumCulled = false; mesh.renderOrder = 20; mesh.userData.noMirror = true; mesh.userData.uniforms = uniforms;
   return mesh;
@@ -189,15 +194,25 @@ export function makeMist(puffs) {
 // ------------------------------------------------------------------------------------------------ falling leaves
 const LEAF_VERT = /* glsl */`
   attribute vec4 aHome; attribute vec4 aSeed; attribute vec3 aTint;   // home xyz + the height it falls from; phase, size, speed, -
-  uniform float uTime; uniform vec4 uLeafUv;
+  uniform float uTime; uniform vec4 uLeafUv; uniform float uGust;
   varying vec2 vUv; varying vec3 vCol; varying float vDist; varying float vY;
-  ${''}
+  ${GLSL_FRONT}
+  #ifdef SHOWER
+    uniform float uShower;                                            // when the bough was last shaken
+  #endif
   void main() {
-    float ph = aSeed.x * 6.2832, u = fract(uTime * 0.045 * aSeed.z + aSeed.x);
+    float ph = aSeed.x * 6.2832;
+    #ifdef SHOWER
+      float u = clamp((uTime - uShower - aSeed.x * 3.5) * 0.075 * aSeed.z, 0.0, 1.0);      // they do not all let go at once
+    #else
+      float u = fract(uTime * 0.045 * aSeed.z + aSeed.x);
+    #endif
     vec3 c = aHome.xyz + vec3(sin(u * 11.0 + ph) * 1.1 + u * 1.6, (1.0 - u) * aHome.w, cos(u * 9.0 + ph * 1.7) * 1.1);
     float spin = uTime * (1.5 + aSeed.x * 2.0) + ph, tip = sin(u * 20.0 + ph) * 1.2;
     vec3 ax = vec3(cos(spin), sin(tip) * 0.6, sin(spin)), ay = normalize(cross(ax, vec3(sin(tip), cos(tip), 0.3)));
-    vec3 p = c + (ax * position.x + ay * position.y) * aSeed.y;
+    c.xz += vec2(0.8, 0.6) * ((uGust - 0.5) * 1.3 * u);                 // the wind that is blowing carries them
+    if (uFrontP.y > 0.0) { vec2 away = c.xz - uFront.xz; c.xz += away / max(length(away), 0.5) * (frontAt(c) * uFrontP.y * 0.25); }
+    vec3 p = c + (ax * position.x + ay * position.y) * (aSeed.y * step(0.002, u) * step(u, 0.998));      // (one that has not let go, or has landed, is not there)
     vec4 wp = modelMatrix * vec4(p, 1.0);
     #ifdef MIRROR
       wp.y = min(wp.y, -0.02);
@@ -220,15 +235,18 @@ const LEAF_FRAG = /* glsl */`
     gl_FragColor = develop(c, 1.0);
   }
 `;
-/** leaves: [{ x, y, z, fall, size, speed, color }], drawn from the flora sheet's leaf. */
-export function makeLeaves(leaves, sheet) {
+/**
+ * leaves: [{ x, y, z, fall, size, speed, color }], drawn from the flora sheet's leaf. shower: they do not fall all the
+ * time but come down together when the bough is shaken: set userData.uniforms.uShower to the moment it was.
+ */
+export function makeLeaves(leaves, sheet, { shower = false } = {}) {
   const n = leaves.length, g = quad(), home = new Float32Array(n * 4), seed = new Float32Array(n * 4), tint = new Float32Array(n * 3);
   leaves.forEach((m, i) => { home.set([m.x, m.y, m.z, m.fall ?? 8], i * 4); seed.set([(i * 0.61803) % 1, m.size ?? 0.07, m.speed ?? 1, 0], i * 4); tint.set(m.color, i * 3); });
   g.setAttribute('aHome', new THREE.InstancedBufferAttribute(home, 4)); g.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 4)); g.setAttribute('aTint', new THREE.InstancedBufferAttribute(tint, 3));
   g.instanceCount = n;
-  const r = region('leaf'), uniforms = { ...shared, tMap: { value: sheet }, uLeafUv: { value: new THREE.Vector4(r[0], r[1], r[2], r[3]) } };
-  const make = (mir) => new THREE.ShaderMaterial({ defines: mir ? { MIRROR: '' } : {}, uniforms, vertexShader: LEAF_VERT, fragmentShader: LEAF_FRAG, side: THREE.DoubleSide });
-  const mesh = new THREE.Mesh(g, make(false)); mesh.frustumCulled = false; mesh.material.mirrorVariant = () => make(true);
+  const r = region('leaf'), uniforms = { ...shared, tMap: { value: sheet }, uLeafUv: { value: new THREE.Vector4(r[0], r[1], r[2], r[3]) }, uShower: { value: -1e4 } };
+  const make = (mir) => new THREE.ShaderMaterial({ defines: { ...(mir ? { MIRROR: '' } : {}), ...(shower ? { SHOWER: '' } : {}) }, uniforms, vertexShader: LEAF_VERT, fragmentShader: LEAF_FRAG, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(g, make(false)); mesh.frustumCulled = false; mesh.material.mirrorVariant = () => make(true); mesh.userData.uniforms = uniforms;
   return mesh;
 }
 
@@ -237,6 +255,7 @@ export function makeLeaves(leaves, sheet) {
 const FLAME_VERT = /* glsl */`
   attribute vec4 aPlace; attribute vec4 aLook;                   // the foot xyz + height; width, phase, brightness, -
   uniform float uTime;
+  ${GLSL_FRONT}
   varying vec2 vUv; varying vec3 vL; varying float vDist; varying float vY;
   void main() {
     vec4 wp = modelMatrix * vec4(aPlace.xyz, 1.0);
@@ -248,6 +267,7 @@ const FLAME_VERT = /* glsl */`
     vec4 mv = viewMatrix * wp; vDist = length(mv.xyz); vY = wp.y;
     vec3 upV = (viewMatrix * vec4(0.0, upSign, 0.0, 0.0)).xyz;
     float lean = sin(uTime * 5.3 + aLook.y * 20.0 + uv.y * 2.5) * 0.09 * uv.y * uv.y;
+    if (uFrontP.y > 0.0) { vec3 away = vec3(wp.x - uFront.x, 0.0, wp.z - uFront.z); lean += (viewMatrix * vec4(normalize(away + 1e-4), 0.0)).x * frontAt(wp.xyz) * uFrontP.y * 0.12 * uv.y; }      // a gust lays it over
     mv.xyz += vec3(1.0, 0.0, 0.0) * (uv.x * aLook.x * 0.5 + lean * aPlace.w) + upV * uv.y * aPlace.w;
     vUv = uv; vL = aLook.yzw;
     gl_Position = projectionMatrix * mv;
@@ -290,6 +310,7 @@ export function makeFlames(flames) {
 const THREAD_VERT = /* glsl */`
   attribute vec4 aTop; attribute vec4 aLook;                     // the top xyz + length; phase, brightness, width, sway
   uniform float uTime; uniform vec3 uThreadGain;
+  ${GLSL_FRONT}
   varying vec2 vUv; varying vec2 vL; varying float vDist; varying float vY; varying float vThin;
   void main() {
     float t = position.y * 0.5 + 0.5;                             // 0 at the top .. 1 at the weight
@@ -303,7 +324,8 @@ const THREAD_VERT = /* glsl */`
     vec4 mv = viewMatrix * wp; vDist = length(mv.xyz); vY = wp.y;
     float w = max(aLook.z, 0.003 * vDist);                        // the card is never narrower than a few pixels; the thread on it is drawn below
     mv.x += position.x * w;
-    vUv = vec2(position.x, t); vL = vec2(aLook.x, aLook.y * uThreadGain.x); vThin = aLook.z / w;
+    float lit = uFrontP.z > 0.0 ? frontAt(vec3(wp.x, uFront.y, wp.z)) * uFrontP.z : 0.0;       // (a thread is lit along its whole length at once)
+    vUv = vec2(position.x, t); vL = vec2(aLook.x, aLook.y * (uThreadGain.x + lit * uThreadGain.y)); vThin = aLook.z / w;
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -327,7 +349,7 @@ export function makeThreads(threads, color = '#ffd27a') {
   const n = threads.length, g = quad(), top = new Float32Array(n * 4), look = new Float32Array(n * 4);
   threads.forEach((f, i) => { top.set([f.x, f.y, f.z, f.length], i * 4); look.set([Math.abs(Math.sin(i * 127.1 + 3.7) * 43758.5453) % 1, f.power ?? 1, f.width ?? 0.008, f.sway ?? 0.02], i * 4); });
   g.setAttribute('aTop', new THREE.InstancedBufferAttribute(top, 4)); g.setAttribute('aLook', new THREE.InstancedBufferAttribute(look, 4)); g.instanceCount = n;
-  const uniforms = { ...shared, uThreadColor: { value: new THREE.Color(color) }, uThreadGain: { value: new THREE.Vector3(1, 0, 0) } };
+  const uniforms = { ...shared, uThreadColor: { value: new THREE.Color(color) }, uThreadGain: { value: new THREE.Vector3(1, 5, 0) } };           // its own brightness; how much a front of light adds
   const make = (mir) => new THREE.ShaderMaterial({ defines: mir ? { MIRROR: '' } : {}, uniforms, vertexShader: THREAD_VERT, fragmentShader: THREAD_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });   // the card hangs downward, which turns its winding
   const mesh = new THREE.Mesh(g, make(false)); mesh.frustumCulled = false; mesh.renderOrder = 28; mesh.userData.mirrorOrder = 5; mesh.material.mirrorVariant = () => make(true); mesh.userData.uniforms = uniforms;
   return mesh;

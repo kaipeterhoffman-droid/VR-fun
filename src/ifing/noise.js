@@ -48,3 +48,9 @@ export function track(keys, s) {
   }
   return keys[keys.length - 1][1];
 }
+
+/**
+ * How hard the wind blows at a moment, 0..1.2: slow swells with quicker ones on them. The wind is heard by this
+ * number (src/ifing/audio.js) and whatever sways is moved by it (src/ifing/paint.js), so that the two agree.
+ */
+export const gustAt = (time, ph = 0) => Math.max(0, Math.min(1.2, 0.5 + 0.3 * Math.sin(time * 0.23 + ph) + 0.22 * Math.sin(time * 0.57 + ph * 2.1) + 0.14 * Math.sin(time * 1.31 + ph * 0.7)));
