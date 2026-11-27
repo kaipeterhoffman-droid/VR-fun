@@ -35,6 +35,10 @@ export const shared = {
   uWind: { value: new THREE.Vector4(0.8, 0.6, 1, 1) },               // direction (x, z), strength, speed
   uMirror: { value: new THREE.Vector4(0.22, 1.12, 1, 0) },           // the water's copy: darker by x, richer by y, how far it wavers
   uMirrorTint: { value: C('#ffffff') },
+  uGust: { value: 0.5 },                                            // how hard the wind is blowing just now, 0..1.2 (the same number the wind is heard by)
+  uFront: { value: new THREE.Vector4(0, -1000, 0, 0) },              // a front going out from a place: where from, how far it has got
+  uFrontP: { value: new THREE.Vector4(1, 0, 0, 0) },                 // how thick it is; how hard it pushes what sways; how much it lights what takes light
+  uFrontColor: { value: C('#000000') },
   tBrush: { value: null },
 };
 
@@ -81,6 +85,14 @@ export const GLSL_FINISH = /* glsl */`
   }
 `;
 
+// A front: a shell of air or of light going out from a place (a giant's breath, a horn's answer, the stroke of a
+// crew). One at a time, set by whichever set piece the boat is at (src/ifing/stage.js). Whatever sways leans away
+// from it as it passes, water ruffles under it, and what was made to take its light is lit by it.
+export const GLSL_FRONT = /* glsl */`
+  uniform vec4 uFront, uFrontP; uniform vec3 uFrontColor;
+  float frontAt(vec3 p) { float x = (distance(p, uFront.xyz) - uFront.w) / uFrontP.x; return exp(-x * x); }
+`;
+
 const LIGHT_PARS = /* glsl */`
   uniform vec3 uKeyDir, uShade, uHalf, uLit, uSkyLight, uGroundLight; uniform float uLightGain;
   uniform vec3 uLanternPos, uLanternColor; uniform float uLanternRadius;
@@ -110,7 +122,11 @@ const LIGHT_PARS = /* glsl */`
 const VERT = /* glsl */`
   uniform float uTime; uniform vec4 uWind; uniform vec4 uMirror;
   #ifdef SWAY
-    attribute float aBend; uniform vec3 uSway;                 // metres at full bend, speed, how much the gusts flutter it
+    attribute float aBend; uniform vec3 uSway; uniform float uGust;      // metres at full bend, speed, how much the gusts flutter it
+  #endif
+  #if defined(SWAY) || defined(FRONT)
+    ${GLSL_FRONT}
+    uniform float uFrontGain;
   #endif
   varying vec3 vWPos; varying vec3 vN; varying vec3 vView; varying vec2 vUv; varying vec3 vCol;
   #ifdef VERTEX_LIT
@@ -135,7 +151,8 @@ const VERT = /* glsl */`
       float ph = wp.x * 0.19 + wp.z * 0.23;
       float sw = sin(uTime * uWind.w * uSway.y + ph) * 0.6 + sin(uTime * uWind.w * uSway.y * 0.43 + ph * 1.7 + 1.7) * 0.4;
       float fl = sin(uTime * uSway.y * 5.1 + ph * 9.0 + position.y * 3.0) * uSway.z;
-      wp.xz += uWind.xy * uWind.z * uSway.x * aBend * (sw + fl);
+      wp.xz += uWind.xy * uWind.z * uSway.x * aBend * (sw + fl) * (0.6 + 0.75 * uGust);
+      if (uFrontP.y > 0.0) { vec2 away = wp.xz - uFront.xz; wp.xz += away / max(length(away), 0.5) * (frontAt(wp.xyz) * uFrontP.y * uSway.x * aBend * (1.0 + 0.35 * fl / max(uSway.z, 0.01))); }
     #endif
     vec3 lp = wp.xyz;                                            // the place that is lit
     #ifdef MIRROR
@@ -152,6 +169,9 @@ const VERT = /* glsl */`
     vec4 mv = viewMatrix * wp; vView = mv.xyz;
     #ifdef VERTEX_LIT
       vLight = lampsLight(lp, vN);
+      #ifdef FRONT
+        if (uFrontP.z > 0.0) vLight += uFrontColor * (frontAt(lp) * uFrontP.z * uFrontGain);      // a front of light going by
+      #endif
     #endif
     gl_Position = projectionMatrix * mv;
   }
@@ -166,6 +186,10 @@ const FRAG = /* glsl */`
   uniform vec3 uColor, uEmissive, uTopColor, uBackColor; uniform vec4 uTop, uRim, uMirror; uniform vec3 uMirrorTint;
   uniform float uBrush, uBrushScale, uWet, uBack, uFogScale, uAlphaTest, uInside;
   uniform sampler2D tBrush, tMap;
+  #ifdef FRONT
+    ${GLSL_FRONT}
+    uniform float uFrontGain;
+  #endif
   varying vec3 vWPos; varying vec3 vN; varying vec3 vView; varying vec2 vUv; varying vec3 vCol;
   // the shared dry-brush strokes, laid from above and from the side (two looks at the picture, no seams on round things)
   vec3 strokes(vec3 p, vec3 n) {
@@ -223,6 +247,9 @@ const FRAG = /* glsl */`
       c += uLit * uLightGain * 0.3 * uRim.rgb * pow(1.0 - clamp(abs(dot(N, V)), 0.0, 1.0), uRim.w) * smoothstep(-0.3, 0.6, dot(V, uKeyDir));
     #endif
     c += uEmissive;
+    #if defined(FRONT) && !defined(VERTEX_LIT)
+      if (uFrontP.z > 0.0) c += uFrontColor * (frontAt(vWPos) * uFrontP.z * uFrontGain) * (0.35 + 0.65 * albedo);
+    #endif
     float dist = length(vView);
     #ifdef MIRROR
       float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -237,7 +264,7 @@ const FRAG = /* glsl */`
 const defaults = {
   color: '#ffffff', map: null, cutout: false, alphaTest: 0.5, side: THREE.FrontSide, vertexLit: false, vertexColors: true,
   brush: 0.16, brushScale: 0.3, top: null, wet: 0, backlight: 0, backColor: '#ffffff', rim: null, emissive: '#000000', emissiveIntensity: 1,
-  sway: null, fogScale: 1, mirror: false, transparent: false, inside: 0.55, clipBelow: false,
+  sway: null, fogScale: 1, mirror: false, transparent: false, inside: 0.55, clipBelow: false, front: 0,
 };
 
 /**
@@ -254,6 +281,7 @@ const defaults = {
  *   vertexLit           the lamps' light worked out at the corners, not at every pixel (trees, leaves, grass)
  *   inside              how dark the back of a two-sided thing is (the inside of a skirt of boughs)
  *   fogScale            below 1 for very large far things that must loom through the air
+ *   front               how much of a passing front's light the thing takes (0 = none; see GLSL_FRONT)
  *   clipBelow           for things that go down into the water (a hull, a paddle): the part under it is not reflected
  *   side
  */
@@ -272,6 +300,7 @@ export function makePaint(opts = {}) {
   if (o.sway) defines.SWAY = '';
   if (o.mirror) defines.MIRROR = '';
   if (o.clipBelow) defines.CLIP_BELOW = '';
+  if (o.front > 0) defines.FRONT = '';
   const top = o.top || {}, rim = o.rim || {}, sw = o.sway || {};
   const rc = C(rim.color ?? '#ffffff');
   const uniforms = {
@@ -283,7 +312,7 @@ export function makePaint(opts = {}) {
     uWet: { value: o.wet }, uBack: { value: o.backlight }, uBackColor: { value: C(o.backColor) },
     uRim: { value: new THREE.Vector4(rc.r * (rim.strength ?? 0.5), rc.g * (rim.strength ?? 0.5), rc.b * (rim.strength ?? 0.5), rim.power ?? 3) },
     uSway: { value: new THREE.Vector3(sw.amp ?? 0.2, sw.speed ?? 1, sw.flutter ?? 0.1) },
-    uFogScale: { value: o.fogScale }, uInside: { value: o.inside },
+    uFogScale: { value: o.fogScale }, uInside: { value: o.inside }, uFrontGain: { value: o.front },
   };
   const mat = new THREE.ShaderMaterial({
     defines, uniforms, vertexShader: VERT, fragmentShader: FRAG, side: o.side, vertexColors: o.vertexColors,

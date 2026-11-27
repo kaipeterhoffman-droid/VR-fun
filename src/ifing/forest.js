@@ -34,10 +34,10 @@ function leafTint(s, r) {
  */
 export function buildForest(world, { clearings = [], lineup = false } = {}) {
   const sheet = floraSheet();
-  const solidMat = makePaint({ vertexLit: true, brush: 0.3, brushScale: 0.5, side: THREE.DoubleSide, inside: 0.5, sway: { amp: 0.22, speed: 0.8, flutter: 0.05 } });
-  const cutMat = makePaint({ map: sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.86, backlight: 0.12, backColor: '#fff0c0', sway: { amp: 0.35, speed: 1.0, flutter: 0.16 } });
+  const solidMat = makePaint({ vertexLit: true, brush: 0.3, brushScale: 0.5, side: THREE.DoubleSide, inside: 0.5, sway: { amp: 0.22, speed: 0.8, flutter: 0.05 }, front: 1.3 });
+  const cutMat = makePaint({ map: sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.86, backlight: 0.12, backColor: '#fff0c0', sway: { amp: 0.35, speed: 1.0, flutter: 0.16 }, front: 1.3 });
 
-  const barkMat = makePaint({ map: barkSheet(), brush: 0.12, brushScale: 0.6, rim: { color: '#ffffff', strength: 0.6, power: 3.2 } });
+  const barkMat = makePaint({ map: barkSheet(), brush: 0.12, brushScale: 0.6, rim: { color: '#ffffff', strength: 0.6, power: 3.2 }, front: 0.8 });
   const pool = (fn, seeds) => seeds.map((seed) => [0, 1, 2].map((lod) => fn(seed, lod)));
   const T = {
     spruce: pool(F.spruce, [11, 12, 13, 14, 15, 16]), pine: pool(F.pine, [21, 22, 23]), birch: pool(F.birch, [31, 32, 33, 34]),

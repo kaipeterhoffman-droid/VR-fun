@@ -19,6 +19,8 @@ There is sound from the moment you press the button, and it is made the way the 
 
 You are not the only thing alive on it. Moths keep to the lantern, midges dance in columns by the banks and show only when the light comes among them, bats work the sky over the landing and the mere, a fish rises now and then, and two herons stand in the shallows, each of which lets you come so near and no nearer.
 
+And each great thing sends something out through the air. The giant's breath pours off his lip, crosses the pool, lays the reeds over and gutters your lantern when it arrives. Sound the horn at the gate and the hail runs down the mere, lighting the wood on both shores, and seven standing stones answer it one after another. Light goes down the stone ship at every stroke of her crew. A shuttle crosses the loom and the warp sings where it passes. The wind you hear is the wind the trees are leaning in.
+
 On a desktop, drag to look and use the arrow keys to row. Add `?from=370` to the address to set off just above the gatehouse, or `?from=640` at the head of the golden grove.
 
 ## Trick Shot (two players, one headset)

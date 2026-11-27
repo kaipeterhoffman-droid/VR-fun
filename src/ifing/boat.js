@@ -335,7 +335,8 @@ export class Boat {
   }
 
   light(look, time) {
-    const fl = 0.88 + 0.07 * Math.sin(time * 11.3) * Math.sin(time * 7.1) + 0.05 * Math.sin(time * 23.7);
+    const g = this.gust || 0;                                                 // a gust at the lantern: the flame lies over and nearly goes
+    const fl = (0.88 + 0.07 * Math.sin(time * 11.3) * Math.sin(time * 7.1) + 0.05 * Math.sin(time * 23.7)) * (1 - g * (0.42 + 0.22 * Math.sin(time * 37) * Math.sin(time * 23)));
     this.lampColor.copy(look.lantern).multiplyScalar(look.lanternPower * fl);
     shared.uLanternPos.value.copy(this.flame); shared.uLanternColor.value.copy(this.lampColor);
     this.glow.color.copy(look.lantern); this.glow.power = 0.55 + 0.35 * look.lanternPower * fl;

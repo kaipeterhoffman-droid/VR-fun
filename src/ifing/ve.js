@@ -179,7 +179,7 @@ function gate(ctx) {
     // the raven says what it thinks of a lantern; and from a long way down the river, as the canoe comes under the
     // gate, somebody who has been watching the water sounds a horn once
     if (!spoken && d < 30 && !boat.frozen) { spoken = true; ctx.hit('croak', birds[0].m.position); }
-    if (!hailed && boat.s > S - 3 && boat.s < S + 30 && !boat.frozen) { hailed = true; ctx.hit('horn', far); }
+    if (!hailed && boat.s > S - 3 && boat.s < S + 30 && !boat.frozen) { hailed = true; ctx.hit('horn', far); ctx.hailed = time; }      // (the shores of the mere take it from there)
     // the runes take light as the lantern comes: first one post, then the other
     [smooth(46, 12, d), smooth(38, 9, d)].forEach((k, i) => { const v = 0.1 + 1.9 * k * (0.86 + 0.14 * Math.sin(time * 1.7 + i * 2)); lit[i].userData.set(v); glows[i].power = 0.26 * k; });
     for (const b of birds) {
@@ -225,15 +225,15 @@ function stoneShip(ctx) {
     set(x, z, w, h, 0.42 + rnd() * 0.2 + h * 0.03, Math.atan2(-1, sd * slope) + (rnd() - 0.5) * 0.3, 4800 + k + (sd > 0 ? 20 : 0));
   }
   const st = new Builder(stones.nv); st.add(stones, F);
-  const moonStone = makePaint({ brush: 0.4, brushScale: 0.3, wet: 0.5, top: { color: '#3c5230', from: 0.62, to: 0.95, amount: 0.55 }, rim: { color: '#cfe0ff', strength: 0.6, power: 2.4 }, side: THREE.DoubleSide, inside: 0.7 });
+  const moonStone = makePaint({ brush: 0.4, brushScale: 0.3, wet: 0.5, top: { color: '#3c5230', from: 0.62, to: 0.95, amount: 0.55 }, rim: { color: '#cfe0ff', strength: 0.6, power: 2.4 }, side: THREE.DoubleSide, inside: 0.7, front: 1.5 });
   ctx.mesh(st, moonStone, S, false, { uv: false, name: 'stone ship' });                                  // no reflection: the water has something else to show
   for (const [x, z, r] of places) { const p = V3(x, 0, z).applyMatrix4(F); ctx.obstacles.push({ x: p.x, z: p.z, r }); }
   const lit = ctx.litRunes('#b4dcff'); { const b = new Builder(cut.nv); b.add(cut, F); ctx.mesh(b, lit, S, false, { name: 'sigla' }); }
 
   // ---- on the water's side: the ship. She lies bows downstream, as the stones do
   const GLOW = new THREE.Color('#1a2638'), GLOW2 = new THREE.Color('#2e3a52');
-  const shipWood = makePaint({ map: woodSheet(), brush: 0.1, brushScale: 0.5, side: THREE.DoubleSide, inside: 0.75, clipBelow: true, emissive: '#1c2c48', rim: { color: '#dfe8ff', strength: 0.7, power: 2.4 } });
-  const cloth = makePaint({ brush: 0.3, brushScale: 0.35, side: THREE.DoubleSide, inside: 0.85, emissive: '#2e3a52', backlight: 0.35, backColor: '#dfe6ff' });
+  const shipWood = makePaint({ map: woodSheet(), brush: 0.1, brushScale: 0.5, side: THREE.DoubleSide, inside: 0.75, clipBelow: true, emissive: '#1c2c48', rim: { color: '#dfe8ff', strength: 0.7, power: 2.4 }, front: 0.8 });
+  const cloth = makePaint({ brush: 0.3, brushScale: 0.35, side: THREE.DoubleSide, inside: 0.85, emissive: '#2e3a52', backlight: 0.35, backColor: '#dfe6ff', front: 0.6 });
   const tint = [0.66, 0.6, 0.56];
   const hull = buildHull({ L, beam: BM, draft: 0.42 * K, sheerMid: 1.15 * K, sheerEnd: 2.9 * K, floorY: 0.2 * K, N: 18, K: 7, lap: 0.04 * K, inside: false, floor: false, out: WOOD_U.grey, tintOut: tint, grain: 4.4 });
   const hb = hull.b, zs = (t) => t * L / 2;
@@ -282,12 +282,17 @@ function stoneShip(ctx) {
   const cold = { position: sternAt, color: new THREE.Color('#8fc0ff'), radius: 7, intensity: 0 }; ctx.lights.push(cold);                   // what the runes give off falls on the stone they are cut in
   let wake = 0;
   const crew = ctx.voice('ship', mid, 95, true);
+  // her crew row, and at every stroke light runs her length from the stern stone to the stem: through the stones on
+  // the land's side, and through the ship herself in the water
+  const sternTop = V3(0, 1.6, L / 2 + 1.7).applyMatrix4(F), PULSE = new THREE.Color('#9cc8ff'), STROKE = 2.3;
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const d = Math.hypot(eye.x - mid.x, eye.z - mid.z);
     if (d > 320) { for (const l of lamps) l.core.power = l.halo.power = 0; crew.level = 0; ghost.update(); return; }
     const to = smooth(86, 30, d); wake += (to - wake) * Math.min(1, dt * 0.6); if (boat.frozen) wake = to;
     for (const l of lamps) { l.core.power = (0.55 + 0.9 * wake) * l.k; l.halo.power = (0.12 + 0.3 * wake) * l.k; }
     crew.level = wake * wake;                                                  // and her crew can be heard at the oars, though not from above the water
+    // (the stroke is the one that is heard: src/ifing/sounds.js lays four of them in 9.2 seconds, each a tenth of a second in)
+    if (wake > 0.02) { const R = ((((time - 0.1) % STROKE) + STROKE) % STROKE) * 26; ctx.front(sternTop, R, 3.4, 1.1 * wake, 1.25 * wake * wake * smooth(0, 4, R) * (1 - smooth(L * 0.85, L + 9, R)), PULSE); }
     shipWood.uniforms.uEmissive.value.copy(GLOW).multiplyScalar(0.35 + 1.1 * wake); cloth.uniforms.uEmissive.value.copy(GLOW2).multiplyScalar(0.35 + 1.1 * wake);     // she comes up in the water as one comes alongside
     dew.userData.uniforms.uMoteP.value.x = 0.2 + 0.9 * wake;
     const rk = smooth(64, 16, Math.hypot(eye.x - sternAt.x, eye.z - sternAt.z)); lit.userData.set(0.25 + 1.6 * rk); cold.intensity = 0.25 + 0.75 * rk;
@@ -302,13 +307,26 @@ function shores(ctx) {
   { const c = onBank(446, 1, 9, 0), n = 9; for (let k = 0; k < n; k++) { const a = k / n * TAU, p = V3(c.x + Math.cos(a) * 4.6, 0, c.z + Math.sin(a) * 4.6), y = groundAt(p.x, p.z, 446); rock(stone, p.x, y + 0.25, p.z, 0.6 + rnd() * 0.3, 0.5 + rnd() * 0.35, 0.6 + rnd() * 0.3, 4460 + k, 1, null, 0.22, 0.6); } rock(stone, c.x, c.y + 0.12, c.z, 1.2, 0.3, 0.9, 4470, 1, null, 0.16, 0.5); }
   // the stone of remembrance on the left shore, beyond the ship: 'minni'
   { const m = frame(onBank(524, -1, 1.4, -0.1), 524, 1.05); menhir(stone, 1.25, 3.3, 0.42, 5241, m); runes(cut, 'minni', [-0.44, 1.7, 0.23], [1, 0, 0], [0, 1, 0], 0.3, [1, 1, 1], m); }
-  for (let k = 0; k < 7; k++) { const sd = k % 2 ? 1 : -1, s = 404 + k * 24 + rnd() * 10, p = onBank(s, sd, 0.6 + rnd() * 3, -0.1), h = 0.9 + rnd() * 1.5; menhir(stone, 0.45 + h * 0.18, h, 0.28, 4480 + k, frame(p, s, rnd() * TAU)); }
+  const tall = [];
+  for (let k = 0; k < 7; k++) { const sd = k % 2 ? 1 : -1, s = 404 + k * 24 + rnd() * 10, p = onBank(s, sd, 0.6 + rnd() * 3, -0.1), h = 0.9 + rnd() * 1.5; menhir(stone, 0.45 + h * 0.18, h, 0.28, 4480 + k, frame(p, s, rnd() * TAU)); tall.push({ x: p.x, y: p.y + h, z: p.z }); }
   ctx.mesh(stone, ctx.mats.stone, 446, true, { uv: false, name: 'shore stones' });                            // one drawing for the whole mere: it is all in sight at once
   const lit = ctx.litRunes('#b4dcff'); lit.userData.set(0.5); ctx.mesh(cut, lit, 524, true, { name: 'minni' });
   const at = onBank(524, -1, 1.4, 1.8);
-  ctx.ticks.push((dt, time, boat, look, eye) => { const d = Math.hypot(eye.x - at.x, eye.z - at.z); if (d < 120) lit.userData.set(0.25 + 1.5 * smooth(40, 12, d)); });
+  // When the horn has answered the gate, the word goes down the mere: light through every stone of its shores, one
+  // after another, as far as the ship; and each of the tall ones gives a note as it takes it
+  const gateAt = spot(GATE, 0, 3), HAIL = new THREE.Color('#a6ccff'), NOTES = [0.749, 0.8409, 1, 1.1225, 1.4983, 1.6818, 2];
+  let told = 0;
+  const HAIL_AT = parseFloat(new URLSearchParams(location.search).get('hail'));
+  ctx.ticks.push((dt, time, boat, look, eye) => {
+    const d = Math.hypot(eye.x - at.x, eye.z - at.z); if (d < 120) lit.userData.set(0.25 + 1.5 * smooth(40, 12, d));
+    const since = boat.frozen && HAIL_AT >= 0 ? HAIL_AT : time - 1.2 - (ctx.hailed ?? -1e4);      // (a horn that far off takes a moment to be heard; ?hail=3 shows it that long after, to be looked at)
+    if (since < 0 || since > 11) { if (since < 0) told = 0; return; }
+    const R = since * 24;
+    ctx.front(gateAt, R, 9, 1.4 * (1 - smooth(120, 230, R)), 1.7 * smooth(0, 12, R) * (1 - smooth(150, 240, R)), HAIL);
+    while (told < tall.length && Math.hypot(tall[told].x - gateAt.x, tall[told].z - gateAt.z) < R) { ctx.hit('string', tall[told], 1, NOTES[told % NOTES.length]); told++; }
+  });
   // mist lying on the mere in long low pieces, where the moon can get at it
   const puffs = [];
   for (let k = 0; k < 26; k++) { const s = 404 + rnd() * 170, hw = river.halfWidth(s), p = spot(s, (rnd() * 2 - 1) * hw * 0.95, 0.3 + rnd() * 0.25); puffs.push({ x: p.x, y: p.y, z: p.z, width: 10 + rnd() * 12, height: 0.7 + rnd() * 0.6, opacity: 0.18 + rnd() * 0.16, drift: 0.4 + rnd() * 0.6 }); }
-  const half = puffs.length >> 1; ctx.world.add(makeMist(puffs.slice(0, half)), 440, false); ctx.world.add(makeMist(puffs.slice(half)), 520, false);
+  const half = puffs.length >> 1; ctx.world.add(makeMist(puffs.slice(0, half), { front: [0.3, 1, 1.5] }), 440, false); ctx.world.add(makeMist(puffs.slice(half), { front: [0.3, 1, 1.5] }), 520, false);
 }

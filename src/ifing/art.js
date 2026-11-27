@@ -238,6 +238,18 @@ export function mistPuff() {
   return t;
 }
 
+/** A billow of breath in cold air: round, soft at its edge, lumped like a cloud and not streaked like lying mist. */
+export function breathPuff() {
+  const n = 128, data = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const u = x / n - 0.5, v = y / n - 0.5, r = Math.hypot(u, v) * 2, f = fbm2(x * 0.045 + 11, y * 0.045 + 5, 4);
+    let a = clamp((1.05 - r) * 1.5 - (1 - f) * 0.75); a = a * a * (3 - 2 * a);
+    const i = (y * n + x) * 4; data[i] = data[i + 1] = data[i + 2] = 255; data[i + 3] = Math.round(a * 255);
+  }
+  const t = new THREE.DataTexture(data, n, n, THREE.RGBAFormat); t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.needsUpdate = true;
+  return t;
+}
+
 /** Long bars of cloud lying over one another, as they do in a northern dusk: r = how much cloud, all round the sky. */
 export function cloudBand() {
   const w = 1024, h = 256, data = new Uint8Array(w * h * 4);

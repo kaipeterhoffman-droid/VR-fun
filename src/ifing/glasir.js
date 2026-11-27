@@ -19,7 +19,7 @@ import { tube, lump, bell } from './flora.js';
 import { river } from './river.js';
 import { BARK_U, barkSheet, region, WOOD_U, loomCloth, LOOM_FELL } from './art.js';
 import { makePaint } from './paint.js';
-import { rng, smooth } from './noise.js';
+import { rng, smooth, gustAt } from './noise.js';
 import { makeMist, makeMotes, makeLeaves, makeThreads } from './fx.js';
 import { spot, frame, TAU } from './kit.js';
 
@@ -146,13 +146,23 @@ function tree(ctx, forest) {
   const halos = [[-6, 25, 2, 30, 0.07], [-16, 17, 2, 24, 0.07], [2, 34, 0, 26, 0.06], [-26, 20, 4, 20, 0.05], [XC, 5, ZL, 13, 0.1]].map(([x, y, z, size, power]) => ctx.glows.add({ position: at(x, y, z), size, color: new THREE.Color('#ffb030'), power }));
   const here = at(XC, 0, ZL);
   ctx.voice('gold', at(-8, 24, 2), 150, true).level = 1;                      // the leaves are gold, and sound like it
-  const strings = ctx.voice('loom', at(XC, 4, ZL), 60);
+  // the loom weaves by itself: a shuttle of light goes through the warp from one end of the beam to the other and,
+  // after a breath, back; each thread is lit as it is passed, and seven of them on the way are sounded
+  const ends = [at(X0, 5.2, ZL), at(X1, 5.2, ZL)], SPAN = X1 - X0, PASS = 5.4, REST = 1.8, WEFT = new THREE.Color('#ffdc92'), SCALE = [1, 1.1225, 1.26, 1.4983, 1.6818, 2, 2.2449];
+  const fret = (i, back) => { const x = X0 + SPAN * (back ? 6.5 - i : i + 0.5) / 7; return at(x, 5.2, ZL); };
+  let pass = -1, sung = 0;
   ctx.ticks.push((dt, time, boat, look, eye) => {
     const on = boat.s > 556 && boat.s < 880; grp.visible = on; if (twin) twin.visible = on;
     if (!on) return;
     const d = Math.hypot(eye.x - here.x, eye.z - here.z), near = smooth(34, 5, d), breath = 0.9 + 0.1 * Math.sin(time * 0.7);
     warp.userData.uniforms.uThreadGain.value.x = (0.7 + 0.8 * near) * breath;                 // the warp brightens as the canoe comes to it
-    strings.level = boat.frozen ? 0 : near;
+    if (d < 90) {
+      const n = Math.floor(time / (PASS + REST)), u = (time - n * (PASS + REST)) / PASS, back = n % 2 === 1;
+      if (n !== pass) { pass = n; sung = 0; }
+      if (u < 1.04) ctx.front(ends[back ? 1 : 0], u * SPAN, 0.55, 0, (0.3 + 0.7 * near) * smooth(0, 0.04, u) * (1 - smooth(0.97, 1.04, u)), WEFT);
+      // (not every thread it passes: which ones changes from pass to pass, so that it is never a scale being practised)
+      while (sung < 7 && u > (sung + 0.5) / 7) { if (near > 0.03 && !boat.frozen && Math.abs(Math.sin(n * 12.9898 + sung * 78.233) * 43758.5453) % 1 < 0.55) ctx.hit('string', fret(sung, back), near, SCALE[back ? 6 - sung : sung]); sung++; }
+    }
     web.intensity = (0.75 + 0.5 * near) * breath; halos[4].power = (0.08 + 0.1 * near) * breath;
   });
 }
@@ -229,6 +239,16 @@ function air(ctx, forest) {
     ctx.world.add(makeLeaves(list, forest.sheet), at, true);
   };
   fall(612, 680, 60, 7, 12, 646); fall(680, 722, 60, 8, 13, 700); fall(722, 772, 200, 9, 20, 746); fall(772, 806, 40, 7, 11, 790);
+  // and when the wind gets up in the crown (the same wind the leaves are heard in) a shower of them is let go together
+  const list = []; for (let k = 0; k < 220; k++) { const s = 716 + rnd() * 58, hw = river.halfWidth(s), q = spot(s, (rnd() * 2 - 1) * (hw + 1), 0.03); list.push({ x: q.x, y: q.y, z: q.z, fall: 13 + rnd() * 12, size: 0.1 + rnd() * 0.07, speed: 0.75 + rnd() * 0.6, color: tint() }); }
+  const shower = makeLeaves(list, forest.sheet, { shower: true }); ctx.world.add(shower, TREE.s, true);
+  let was = 0, last = -1e4;
+  ctx.ticks.push((dt, time, boat) => {
+    if (boat.s < 600 || boat.s > 840) return;
+    const g = gustAt(time, 3);
+    if (boat.frozen) last = time - 5; else if (g > 0.8 && was <= 0.8 && time - last > 16) last = time;
+    was = g; shower.userData.uniforms.uShower.value = last;
+  });
   // gold dust in the air under the crown, and a low gilded mist on the pool
   const motes = []; for (let k = 0; k < 70; k++) { const s = 720 + rnd() * 50, q = spot(s, (rnd() * 2 - 1) * river.halfWidth(s), 0.6 + rnd() * 6); motes.push({ x: q.x, y: q.y, z: q.z, roam: 1.5 + rnd() * 2.5, size: 0.02 + rnd() * 0.02, speed: 0.2 + rnd() * 0.3, kind: 0, color: [1.5, 1.05, 0.35] }); }
   ctx.world.add(makeMotes(motes), TREE.s, true);
