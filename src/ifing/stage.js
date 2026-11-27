@@ -8,6 +8,7 @@ import { buildNaust } from './naust.js';
 import { buildIronwood } from './ironwood.js';
 import { buildVe } from './ve.js';
 import { buildGlasir } from './glasir.js';
+import { buildLife } from './life.js';
 
 export function buildStage({ world, glows, water, engine }) {
   const two = { side: THREE.DoubleSide };
@@ -21,7 +22,7 @@ export function buildStage({ world, glows, water, engine }) {
   };
   const ctx = {
     world, glows, water, engine, mats,
-    clearings: [], obstacles: [], lights: [], ticks: [], planters: [], wallGaps: [], sounds: [], hits: [],
+    clearings: [], obstacles: [], lights: [], ticks: [], planters: [], wallGaps: [], sounds: [], hits: [], lamps: [],
     /** Put what a builder holds into the world as one drawing, in the section at s (null: always there). */
     mesh(b, mat, s, mirror = true, opts = {}) {
       if (!b.nv) return null;
@@ -48,6 +49,7 @@ export function buildStage({ world, glows, water, engine }) {
   buildIronwood(ctx);
   buildVe(ctx);
   buildGlasir(ctx);
+  buildLife(ctx);
   return {
     clearings: ctx.clearings, obstacles: ctx.obstacles, lights: ctx.lights, sounds: ctx.sounds, hits: ctx.hits, ctx,
     /** Once the forest stands: the pieces that need its trees (a lone birch, a giant spruce) plant them. */

@@ -239,6 +239,7 @@ export function lamp(ctx, pos, s, scale = 1.5, power = 1, mirror = true, hung = 
   const core = ctx.glows.add({ position: at, size: 0.22 * scale, color: new THREE.Color('#ffb860'), power: 1.1 * power, flicker: 0.3 });
   const halo = ctx.glows.add({ position: at, size: 1.1 * scale, color: new THREE.Color('#ff8a30'), power: 0.22 * power, flicker: 0.2 });
   const h = { light, core, halo, at, group: g, power };
+  ctx.lamps.push(at);                                                       // (moths find it: src/ifing/life.js)
   ctx.ticks.push((dt, time) => { const f = (0.9 + 0.07 * Math.sin(time * 7.3 + ph) * Math.sin(time * 4.1 + ph * 2)) * h.power; light.intensity = 1.2 * f; core.power = 1.1 * f; halo.power = 0.22 * f; });
   return h;
 }

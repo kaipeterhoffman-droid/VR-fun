@@ -17,6 +17,8 @@ The river carries you by itself: do nothing and you float the whole way in a lit
 
 There is sound from the moment you press the button, and it is made the way the pictures are. Water is a crowd of bubbles, each ringing at the pitch its size gives it; the catch of an oar, the hearth, an owl in the wood, a horn a long way off and the giant turning over are all worked out as numbers while the page loads. Each reach holds one low chord, which opens when something great is near. `M` mutes it, and `?quiet` starts silent.
 
+You are not the only thing alive on it. Moths keep to the lantern, midges dance in columns by the banks and show only when the light comes among them, bats work the sky over the landing and the mere, a fish rises now and then, and two herons stand in the shallows, each of which lets you come so near and no nearer.
+
 On a desktop, drag to look and use the arrow keys to row. Add `?from=370` to the address to set off just above the gatehouse, or `?from=640` at the head of the golden grove.
 
 ## Trick Shot (two players, one headset)

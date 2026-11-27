@@ -219,6 +219,13 @@ function crew(sec = 9.2) {
   return set(filter(out, 'lp', 700), 0.9);
 }
 
+/** One beat of a great wing: air pushed down, and let go. */
+function flap(seed) {
+  const rnd = rng(seed), out = new Float32Array(N(0.34)), air = filter(white(out.length, rnd), 'bp', 420 + rnd() * 120, 0.7), hush = filter(white(out.length, rnd), 'bp', 1500, 0.6);
+  for (let i = 0; i < out.length; i++) { const t = i / SR, e = Math.min(1, t / 0.035) * Math.exp(-t / 0.07); out[i] = air[i] * e + hush[i] * e * e * 0.35; }
+  return ends(set(out, 0.9), 0.002, 0.05);
+}
+
 /** A room for the sounds to be in: what a wooded valley gives back, left and right, the high sounds lost first. */
 function valley(seed) {
   const rnd = rng(seed), n = N(3.0), out = new Float32Array(n), pre = N(0.018);
@@ -258,6 +265,7 @@ export async function composeSounds(pause = async () => {}) {
   await make('groan', groan);
   await make('pluck', pluck);
   await make('crew', crew);
+  for (let k = 0; k < 2; k++) await make('flap' + k, () => flap(220 + k));
   await make('roomL', () => valley(211));
   await make('roomR', () => valley(212));
   return S;

@@ -31,7 +31,7 @@ export const K = {
   swish: 0.5, oarBubbles: 0.22, splash: 0.34, thunk: 0.1, drip: 0.1, bump: 0.5,
   tone: 0.022, lyre: 0.1, owl: 0.1, touch: 0.07,
   fire: 1.15, breath: 1.3, gold: 0.6, goldBed: 0.14, ship: 0.38, pluck: 0.26,
-  plunge: 0.6, drop: 0.22, groan: 0.5, horn: 0.14, croak: 0.15,
+  plunge: 0.6, drop: 0.22, groan: 0.5, horn: 0.14, croak: 0.15, fish: 0.2, launch: 0.3, wing: 0.4,
 };
 /** The notes a lyre may pick, as speeds of the one string that was made (which is D): cold fifths for the mere, and the well's own. */
 const SCALE = { ve: [0.749, 0.8409, 1, 1.1225, 1.4983], well: [0.5, 0.749, 1, 1.26, 1.4983, 2], loom: [1, 1.1225, 1.26, 1.4983, 1.6818, 2, 2.2449] };
@@ -275,5 +275,8 @@ const HITS = {
   drop: { reach: 40, say: (A, h, k, rnd) => A.say('drop' + Math.floor(rnd() * 3), { at: h, gain: K.drop * k, rate: 0.8 + 0.4 * rnd() }) },
   groan: { reach: 260, say: (A, h) => A.say('groan', { at: h, to: A.far.in, gain: K.groan }) },
   horn: { reach: 1e9, say: (A, h) => A.say('horn', { at: h, to: A.far.in, gain: K.horn }) },
+  fish: { reach: 30, say: (A, h, k, rnd) => A.say('drop' + Math.floor(rnd() * 3), { at: h, gain: K.fish * Math.min(1, k * 2.5), rate: 0.5 + 0.2 * rnd(), near: true }) },
+  launch: { reach: 60, say: (A, h, k, rnd) => A.say('splash' + Math.floor(rnd() * 4), { at: h, gain: K.launch * Math.min(1, k * 2.5), rate: 0.8 }) },
+  wing: { reach: 70, say: (A, h, k, rnd) => A.say('flap' + Math.floor(rnd() * 2), { at: h, gain: K.wing * Math.min(1, k * 4), rate: 0.9 + 0.2 * rnd() }) },
   croak: { reach: 70, say: (A, h, k, rnd) => { let at = 0; for (let q = 0; q < 2 + Math.floor(rnd() * 2); q++) { A.say('croak' + (q & 1), { at: h, gain: K.croak * Math.min(1, k * 3) * (q ? 0.8 : 1), rate: 0.94 + 0.1 * rnd(), when: at }); at += 0.5 + rnd() * 0.25; } } },
 };
