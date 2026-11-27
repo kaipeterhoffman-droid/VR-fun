@@ -89,23 +89,23 @@ function tree(ctx, forest) {
   for (let k = 0; k < 16; k++) { const a = rnd() * TAU, d = 4 + rnd() * 15, y = 30 + rnd() * 12 - d * 0.5; crown(Math.cos(a) * d - 3, y, Math.sin(a) * d, 5 + rnd() * 3, 0.8); }                    // the head of the crown
 
   const barkMat = makePaint({ map: barkSheet(), color: '#fff0d4', brush: 0.12, brushScale: 0.6, rim: { color: '#ffe2a8', strength: 0.6, power: 3 }, fogScale: 0.5 });
-  const leafMat = makePaint({ map: forest.sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.92, backlight: 0.4, backColor: '#ffd070', emissive: '#6a4410', fogScale: 0.5, sway: { amp: 0.35, speed: 1.0, flutter: 0.16 } });
+  const leafMat = makePaint({ map: forest.sheet, cutout: true, alphaTest: 0.42, vertexLit: true, brush: 0, side: THREE.DoubleSide, inside: 0.92, backlight: 0.4, backColor: '#ffd070', emissive: '#7a5012', fogScale: 0.5, sway: { amp: 0.35, speed: 1.0, flutter: 0.16 } });
   const grp = new THREE.Group(); grp.name = 'Glasir';
   { const b = new Builder(bk.nv); b.add(bk, F); grp.add(new THREE.Mesh(b.build({ bend: false }), barkMat)); const l = new Builder(lf.nv); l.add(lf, F); grp.add(new THREE.Mesh(l.build(), leafMat)); }
   const twin = ctx.world.add(grp, null, true);                                             // too big to belong to one stretch of the river: it is shown from the head of its reach
   { const p = at(0, 0, 0); ctx.obstacles.push({ x: p.x, z: p.z, r: 4.4 }); }
 
   // ---- the loom
-  const X0 = XL + 1.3, X1 = -TREE.out - 1.7, ZL = 1.8, YB = 9.4, CW = 15, CH = 2.35, CELL = CW / 256, CT = YB - 0.14;      // the cloth beam's ends; the web: 15 m of it, hung from the beam
+  const X0 = XL + 1.3, X1 = -TREE.out - 1.7, ZL = 1.8, YB = 8.5, CW = 17, CH = CW * 40 / 256, CELL = CW / 256, CT = YB - 0.14;      // the cloth beam's ends; the web: 15 m of it, hung from the beam
   const lw = new Builder(1500), ws = new Builder(2500), rope = () => [0.78, 0.68, 0.46];
   const limbY = (x) => { let i = 0; while (i < LOOM.length - 2 && LOOM[i + 1][0] > x) i++; const a = LOOM[i], b = LOOM[i + 1], t = (x - a[0]) / (b[0] - a[0]); return a[1] + (b[1] - a[1]) * t - (a[3] + (b[3] - a[3]) * t) * 0.9; };
   tube(lw, [[X0 - 0.5, YB, ZL, 0.15], [X0 + 0.1, YB, ZL, 0.18], [(X0 + X1) / 2, YB - 0.05, ZL, 0.18], [X1 - 0.1, YB, ZL, 0.18], [X1 + 0.5, YB, ZL, 0.15]], 8, () => [0.86, 0.82, 0.76], null, [0.6, 0.56, 0.5], WOOD_U.carved, 0.9);
   for (let k = 0; k < 7; k++) { const x = X0 + 0.2 + (X1 - X0 - 0.4) * k / 6; tube(lw, [[x, limbY(x) + 0.1, ZL, 0.028], [x + 0.03, (limbY(x) + YB) / 2, ZL, 0.028], [x, YB + 0.16, ZL, 0.028]], 4, rope, null, false, WOOD_U.pale, 0.3); }
   // the heddle rod before the warp and the shed rod behind it, in two lengths each, and the cords they hang by
   for (const [x0, x1] of [[X0 + 0.1, XC - 2.5], [XC + 2.5, X1 - 0.1]]) {
-    tube(lw, [[x0, 5.4, ZL + 0.24, 0.05], [x1, 5.4, ZL + 0.24, 0.05]], 6, () => [0.8, 0.76, 0.7], null, true, WOOD_U.pale, 1.5);
+    tube(lw, [[x0, 4.7, ZL + 0.24, 0.05], [x1, 4.7, ZL + 0.24, 0.05]], 6, () => [0.8, 0.76, 0.7], null, true, WOOD_U.pale, 1.5);
     tube(lw, [[x0, 2.5, ZL - 0.14, 0.045], [x1, 2.5, ZL - 0.14, 0.045]], 6, () => [0.74, 0.7, 0.66], null, true, WOOD_U.grey, 1.5);
-    for (const x of [x0 + 0.15, x1 - 0.15]) tube(lw, [[x, YB - 0.15, ZL + 0.1, 0.014], [x, 5.45, ZL + 0.24, 0.014]], 3, rope, null, false, WOOD_U.pale, 0.3);
+    for (const x of [x0 + 0.15, x1 - 0.15]) tube(lw, [[x, YB - 0.15, ZL + 0.1, 0.014], [x, 4.75, ZL + 0.24, 0.014]], 3, rope, null, false, WOOD_U.pale, 0.3);
   }
   // the weaving sword, left in the shed where the last row was beaten up
   { const x = X0 + 238 * CELL, y = CT - 7 / 40 * CH; tube(lw, [[x - 1.5, y - 0.02, ZL + 0.05, 0.012], [x - 1.2, y, ZL + 0.05, 0.05], [x + 0.6, y + 0.02, ZL + 0.05, 0.045], [x + 1.0, y + 0.02, ZL + 0.05, 0.02], [x + 1.02, y + 0.02, ZL + 0.05, 0.035], [x + 1.3, y + 0.02, ZL + 0.05, 0.03]], 4, () => [1, 0.98, 0.9], null, true, WOOD_U.pale, 1); }
@@ -113,14 +113,18 @@ function tree(ctx, forest) {
   const cloth = new Builder(60);
   { const n = 24, row = []; for (let i = 0; i <= n; i++) { const x = X0 + CW * i / n, sag = 0.03 * Math.sin(i * 1.3); row.push([cloth.vert(x, CT, ZL, 0, 0, 1, [1, 1, 1], i / n, 0, 0), cloth.vert(x, CT - CH, ZL + sag, 0, 0, 1, [1, 1, 1], i / n, 1, 0.45)]); } for (let i = 0; i < n; i++) cloth.quad(row[i][0], row[i + 1][0], row[i + 1][1], row[i][1]); }
   // the warp, and the stones that hold it down: ringed, a bunch of threads to each
-  const threads = [], ring = (x, y, r) => { const pts = []; for (let i = 0; i <= 7; i++) { const a = i / 7 * TAU; pts.push([x + Math.cos(a) * r, y + Math.sin(a) * r, ZL, r * 0.42]); } tube(ws, pts, 5, (i, j) => { const v = 0.5 + 0.3 * ((i * 3 + j) % 4) / 4; return [v, v, v * 1.04]; }); };
+  const threads = [], ring = (x, y, r) => {                                 // a stone with a hole through it, no two alike, turned a little on its thread
+    const pts = [], yaw = (rnd() - 0.5) * 1.4, cs = Math.cos(yaw), sn = Math.sin(yaw), ph = rnd() * TAU, ob = 0.75 + rnd() * 0.3, v0 = 0.24 + rnd() * 0.14;
+    for (let i = 0; i <= 9; i++) { const a = i / 9 * TAU, rr = r * (1 + 0.16 * Math.sin(a * 2 + ph)), dx = Math.cos(a) * rr * ob; pts.push([x + dx * cs, y + Math.sin(a) * rr, ZL + dx * sn, r * (0.5 + 0.1 * Math.sin(a * 3 + ph))]); }
+    tube(ws, pts, 5, (i, j) => { const v = v0 * (0.8 + 0.4 * ((i * 3 + j) % 4) / 4); return [v, v * 0.97, v * 0.92]; });
+  };
   let n = 0, yBot = 1;
   for (let x = X0 + 0.04; x < X1 - 0.02; x += 0.06, n++) {
     const cx = (x - X0) / CELL, gap = Math.abs(x - XC) < 2.3;
     const top = cx < 206 ? CT - CH : cx < 244 ? CT - Math.min(40, 244 - cx) / 40 * CH : YB - 0.16;
-    if (n % 8 === 0) { yBot = gap ? 4.5 + 0.25 * Math.sin(n) : 0.95 + 0.3 * rnd(); ring(x + 0.21, yBot - (gap ? 0.14 : 0.2), gap ? 0.11 : 0.17); }
+    if (n % 8 === 0) { yBot = gap ? 3.9 + 0.25 * Math.sin(n) : 1.0 + 0.3 * rnd(); ring(x + 0.21, yBot - (gap ? 0.15 : 0.24), gap ? 0.12 : 0.2); }
     const p = at(x, top, ZL + (rnd() - 0.5) * 0.02);
-    threads.push({ x: p.x, y: p.y, z: p.z, length: top - yBot, power: 0.8 + rnd() * 0.6, width: 0.007, sway: gap ? 0.012 : 0.03 + rnd() * 0.03 });
+    threads.push({ x: p.x, y: p.y, z: p.z, length: top - yBot, power: 1.5 + rnd() * 1.4, width: 0.009, sway: gap ? 0.012 : 0.03 + rnd() * 0.03 });
   }
   const warp = makeThreads(threads, '#ffd27a');
   const clothMat = makePaint({ map: loomCloth(), cutout: true, alphaTest: 0.5, brush: 0.2, brushScale: 0.8, side: THREE.DoubleSide, inside: 0.85, emissive: '#3a2008', sway: { amp: 0.1, speed: 0.6, flutter: 0.04 } });

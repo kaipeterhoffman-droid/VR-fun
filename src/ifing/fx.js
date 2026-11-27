@@ -290,7 +290,7 @@ export function makeFlames(flames) {
 const THREAD_VERT = /* glsl */`
   attribute vec4 aTop; attribute vec4 aLook;                     // the top xyz + length; phase, brightness, width, sway
   uniform float uTime; uniform vec3 uThreadGain;
-  varying vec2 vUv; varying vec2 vL; varying float vDist; varying float vY;
+  varying vec2 vUv; varying vec2 vL; varying float vDist; varying float vY; varying float vThin;
   void main() {
     float t = position.y * 0.5 + 0.5;                             // 0 at the top .. 1 at the weight
     vec3 p = aTop.xyz - vec3(0.0, aTop.w * t, 0.0);
@@ -301,17 +301,21 @@ const THREAD_VERT = /* glsl */`
       wp.y = min(wp.y, -0.02);
     #endif
     vec4 mv = viewMatrix * wp; vDist = length(mv.xyz); vY = wp.y;
-    mv.x += position.x * max(aLook.z, 0.0011 * vDist);
-    vUv = vec2(position.x, t); vL = aLook.xy * vec2(1.0, uThreadGain.x);
+    float w = max(aLook.z, 0.003 * vDist);                        // the card is never narrower than a few pixels; the thread on it is drawn below
+    mv.x += position.x * w;
+    vUv = vec2(position.x, t); vL = vec2(aLook.x, aLook.y * uThreadGain.x); vThin = aLook.z / w;
     gl_Position = projectionMatrix * mv;
   }
 `;
 const THREAD_FRAG = /* glsl */`
   ${GLSL_FINISH}
   uniform vec3 uThreadColor;
-  varying vec2 vUv; varying vec2 vL; varying float vDist; varying float vY;
+  varying vec2 vUv; varying vec2 vL; varying float vDist; varying float vY; varying float vThin;
   void main() {
-    float core = 1.0 - abs(vUv.x); core *= core;
+    // A thread far off is thinner than a pixel. Drawn as a tent exactly one pixel to either side it gives the same light
+    // wherever it falls on the grid, so a whole warp of them does not beat against the screen; it only grows fainter.
+    float px = 1.0 / max(fwidth(vUv.x), 1e-4), thick = px * vThin;
+    float core = max(0.0, 1.0 - abs(vUv.x) * px / max(thick, 1.0)) * min(1.0, thick);
     float run = fract(vUv.y * 1.7 - uTime * (0.05 + 0.08 * fract(vL.x * 7.0)) + vL.x * 13.0);
     float glint = pow(max(0.0, 1.0 - abs(run - 0.5) * 9.0), 2.0);
     float a = core * (0.3 + 1.6 * glint) * (0.55 + 0.45 * sin(vL.x * 90.0 + uTime * 0.6)) * smoothstep(0.0, 0.02, vUv.y);
@@ -321,10 +325,10 @@ const THREAD_FRAG = /* glsl */`
 /** threads: [{ x, y, z (the top), length, power, width, sway }] */
 export function makeThreads(threads, color = '#ffd27a') {
   const n = threads.length, g = quad(), top = new Float32Array(n * 4), look = new Float32Array(n * 4);
-  threads.forEach((f, i) => { top.set([f.x, f.y, f.z, f.length], i * 4); look.set([(i * 0.61803) % 1, f.power ?? 1, f.width ?? 0.008, f.sway ?? 0.02], i * 4); });
+  threads.forEach((f, i) => { top.set([f.x, f.y, f.z, f.length], i * 4); look.set([Math.abs(Math.sin(i * 127.1 + 3.7) * 43758.5453) % 1, f.power ?? 1, f.width ?? 0.008, f.sway ?? 0.02], i * 4); });
   g.setAttribute('aTop', new THREE.InstancedBufferAttribute(top, 4)); g.setAttribute('aLook', new THREE.InstancedBufferAttribute(look, 4)); g.instanceCount = n;
   const uniforms = { ...shared, uThreadColor: { value: new THREE.Color(color) }, uThreadGain: { value: new THREE.Vector3(1, 0, 0) } };
-  const make = (mir) => new THREE.ShaderMaterial({ defines: mir ? { MIRROR: '' } : {}, uniforms, vertexShader: THREAD_VERT, fragmentShader: THREAD_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const make = (mir) => new THREE.ShaderMaterial({ defines: mir ? { MIRROR: '' } : {}, uniforms, vertexShader: THREAD_VERT, fragmentShader: THREAD_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });   // the card hangs downward, which turns its winding
   const mesh = new THREE.Mesh(g, make(false)); mesh.frustumCulled = false; mesh.renderOrder = 28; mesh.userData.mirrorOrder = 5; mesh.material.mirrorVariant = () => make(true); mesh.userData.uniforms = uniforms;
   return mesh;
 }
