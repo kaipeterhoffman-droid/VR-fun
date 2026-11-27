@@ -287,7 +287,7 @@ function jotun(ctx, forest) {
   const at = (x, y, z) => V3(x, y, z).applyMatrix4(G), inHand = (x, y, z) => V3(x, y, z).applyMatrix4(Hm).applyMatrix4(G);
   for (const [x, z, r] of [[0, 0, 3.5], [0, 4.4, 3.2], [0, 7.4, 3.0], [3.6, 3.2, 1.8], [-1, -4, 3]]) { const p = inHand(x, 0, z); ctx.obstacles.push({ x: p.x, z: p.z, r }); }
   // ---- what light the night has left comes down on his face through the gap he keeps in the wood
-  const key = { position: at(14, 44, 40), color: new THREE.Color('#a8dcd2'), radius: 80, intensity: 1.0 };
+  const key = { position: at(14, 44, 40), color: new THREE.Color('#a8dcd2'), radius: 80, intensity: 1.0, glint: false };
   ctx.lights.push(key);
   // ---- the lantern in his hand
   const kept = lamp(ctx, inHand(0.5, 1.6, 0.9), S - 14, 2.0);

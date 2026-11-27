@@ -15,7 +15,7 @@
 // come from. He is the one cold thing in the grove. He watches the canoe go by.
 import * as THREE from 'three';
 import { Builder, mulCol, mixCol } from './build.js';
-import { tube, lump, bell } from './flora.js';
+import { tube, lump, bell, sweep } from './flora.js';
 import { river } from './river.js';
 import { BARK_U, barkSheet, region, WOOD_U, loomCloth, LOOM_FELL } from './art.js';
 import { makePaint } from './paint.js';
@@ -54,10 +54,19 @@ function tree(ctx, forest) {
     for (let i = 0; i < rings.length - 1; i++) for (let j = 0; j < sides; j++) { const a = first + i * (sides + 1) + j; bk.quad(a, a + 1, a + sides + 2, a + sides + 1); }
   }
   // ---- roots: they go out a long way before they go under, and the ones on the river's side go into the water
+  // They wander as they go, hump where they cross a stone, and most of them put out a lesser root to one side.
   for (let k = 0; k < 10; k++) {
-    const a = k / 10 * TAU + (rnd() - 0.5) * 0.3, cs = Math.cos(a), sn = Math.sin(a), far = 9 + rnd() * 5, wob = (rnd() - 0.5) * 0.5, arch = cs < -0.3 ? 0.5 + rnd() * 0.6 : 0;
-    const P = (d, y, r) => [cs * d - sn * wob * d * 0.12, y, sn * d + cs * wob * d * 0.12, r];
-    tube(bk, [P(2.9, 2.2, 1.0), P(4.6, 1.5 + arch * 0.4, 0.8), P(far * 0.55, 0.9 + arch, 0.58), P(far * 0.8, 0.3 + arch * 0.5, 0.4), P(far, -0.5, 0.24), P(far + 1.6, -1.3, 0.1)], 7, () => pale(0.8), null, false, U, 3);
+    const a = k / 10 * TAU + (rnd() - 0.5) * 0.3, far = 10 + rnd() * 6, arch = Math.cos(a) < -0.3 ? 0.5 + rnd() * 0.6 : 0, ph = rnd() * TAU, amp = 0.7 + rnd() * 0.9;
+    const root = (a, far, arch, ph, amp, r0, d0, y0) => {
+      const cs = Math.cos(a), sn = Math.sin(a), P = (u, y, r) => { const d = d0 + (far - d0) * u, w = amp * Math.sin(u * 4.4 + ph) * u; return [cs * d - sn * w, y, sn * d + cs * w, r * r0]; };
+      const path = sweep([P(0, y0, 1.15), P(0.16, y0 * 0.62, 0.92), P(0.4, 0.75 + arch * 0.5, 0.68), P(0.6, 0.98 + arch, 0.54), P(0.78, 0.32 + arch * 0.4, 0.42), P(0.92, -0.15, 0.3), P(1.06, -0.9, 0.15), P(1.2, -1.7, 0.05)], 3);
+      tube(bk, path.map((q, i) => [q[0], q[1], q[2], q[3] * (1 + 0.09 * Math.sin(i * 1.9 + ph * 3))]), r0 > 0.7 ? 9 : 7, () => pale(0.8), null, false, U, 3);
+      return (u) => P(u, 0.75 + arch * 0.5, 1);
+    };
+    const on = root(a, far, arch, ph, amp, 1, 2.6, 2.5);
+    if (k % 3 !== 1) { const q = on(0.4), turn = (rnd() < 0.5 ? -1 : 1) * (0.45 + rnd() * 0.4), a2 = a + turn, len = 4 + rnd() * 4;          // the lesser root: it leaves the greater where that first comes down
+      const cs = Math.cos(a2), sn = Math.sin(a2), w = (rnd() - 0.5) * 1.2, pts = [[q[0], q[1] - 0.1, q[2], 0.4], [q[0] + cs * len * 0.3 - sn * w * 0.3, q[1] + 0.05, q[2] + sn * len * 0.3 + cs * w * 0.3, 0.33], [q[0] + cs * len * 0.65 - sn * w, 0.25 + arch * 0.3, q[2] + sn * len * 0.65 + cs * w, 0.24], [q[0] + cs * len - sn * w * 0.6, -0.3, q[2] + sn * len + cs * w * 0.6, 0.13], [q[0] + cs * (len + 1.3), -1.2, q[2] + sn * (len + 1.3), 0.04]];
+      tube(bk, sweep(pts, 3), 6, () => pale(0.74), null, false, U, 3); }
   }
   // ---- the limbs, and on them the leaves: bells of gold, the low ones weeping toward the water
   const tintAt = (body) => (z) => (z === 0 ? mixCol(body, G_TOP, 0.6) : z === 1 ? mixCol(body, G_TOP, 0.3) : z === 2 ? body : mixCol(body, G_RED, 0.6));
@@ -121,9 +130,9 @@ function tree(ctx, forest) {
   { const n = 24, row = []; for (let i = 0; i <= n; i++) { const x = X0 + CW * i / n, sag = 0.03 * Math.sin(i * 1.3); row.push([cloth.vert(x, CT, ZL, 0, 0, 1, [1, 1, 1], i / n, 0, 0), cloth.vert(x, CT - CH, ZL + sag, 0, 0, 1, [1, 1, 1], i / n, 1, 0.45)]); } for (let i = 0; i < n; i++) cloth.quad(row[i][0], row[i + 1][0], row[i + 1][1], row[i][1]); }
   // the warp, and the stones that hold it down: ringed, a bunch of threads to each
   const threads = [], ring = (x, y, r) => {                                 // a stone with a hole through it, no two alike, turned a little on its thread
-    const pts = [], yaw = (rnd() - 0.5) * 1.4, cs = Math.cos(yaw), sn = Math.sin(yaw), ph = rnd() * TAU, ob = 0.75 + rnd() * 0.3, v0 = 0.24 + rnd() * 0.14;
-    for (let i = 0; i <= 9; i++) { const a = i / 9 * TAU, rr = r * (1 + 0.16 * Math.sin(a * 2 + ph)), dx = Math.cos(a) * rr * ob; pts.push([x + dx * cs, y + Math.sin(a) * rr, ZL + dx * sn, r * (0.5 + 0.1 * Math.sin(a * 3 + ph))]); }
-    tube(ws, pts, 5, (i, j) => { const v = v0 * (0.8 + 0.4 * ((i * 3 + j) % 4) / 4); return [v, v * 0.97, v * 0.92]; });
+    const pts = [], yaw = (rnd() - 0.5) * 1.4, cs = Math.cos(yaw), sn = Math.sin(yaw), ph = rnd() * TAU, ob = 0.75 + rnd() * 0.3, v0 = 0.36 + rnd() * 0.2, zz = ZL + (rnd() < 0.5 ? -0.13 : 0.11);
+    for (let i = 0; i <= 9; i++) { const a = i / 9 * TAU, rr = r * (1 + 0.16 * Math.sin(a * 2 + ph)), dx = Math.cos(a) * rr * ob; pts.push([x + dx * cs, y + Math.sin(a) * rr, zz + dx * sn, r * (0.37 + 0.09 * Math.sin(a * 3 + ph))]); }
+    tube(ws, pts, 5, (i, j) => { const v = v0 * (0.8 + 0.4 * ((i * 3 + j) % 4) / 4); return [v, v * 0.93, v * 0.82]; });
   };
   let n = 0, yBot = 1;
   for (let x = X0 + 0.04; x < X1 - 0.02; x += 0.06, n++) {
@@ -141,7 +150,7 @@ function tree(ctx, forest) {
   ctx.world.add(loom, S, true);
 
   // ---- its light: on the water and the bole from the web, and in the air from the crown
-  const web = { position: at(XC, 5.5, ZL + 1.5), color: new THREE.Color('#ffc24a'), radius: 21, intensity: 0.9 }, foot = { position: at(-4.5, 5, 3.5), color: new THREE.Color('#ffb040'), radius: 15, intensity: 0.7 };
+  const web = { position: at(XC, 5.5, ZL + 1.5), color: new THREE.Color('#ffc24a'), radius: 21, intensity: 0.9 }, foot = { position: at(-4.5, 5, 3.5), color: new THREE.Color('#ffb040'), radius: 15, intensity: 0.7, glint: false };
   ctx.lights.push(web, foot);
   const halos = [[-6, 25, 2, 30, 0.07], [-16, 17, 2, 24, 0.07], [2, 34, 0, 26, 0.06], [-26, 20, 4, 20, 0.05], [XC, 5, ZL, 13, 0.1]].map(([x, y, z, size, power]) => ctx.glows.add({ position: at(x, y, z), size, color: new THREE.Color('#ffb030'), power }));
   const here = at(XC, 0, ZL);
@@ -170,16 +179,22 @@ function tree(ctx, forest) {
 // ------------------------------------------------------------------------------------------------ the stag
 function stag(ctx) {
   const S = STAG.s, hw = river.halfWidth(S), here = river.at(S), p = spot(S, -(hw - 1.4), -0.14);
-  const body = new Builder(1200), head = new Builder(900), W = () => [1, 1, 1], BONE = () => [0.84, 0.88, 0.96];
-  // He faces +z in his own frame. A red deer a quarter over life size: 1.6 m at the shoulder.
-  lump(body, 0, 1.45, 0.0, 0.33, 0.4, 0.82, 2, 5, 0.03, W); lump(body, 0, 1.54, 0.5, 0.3, 0.44, 0.42, 1, 6, 0.03, W); lump(body, 0, 1.5, -0.52, 0.33, 0.42, 0.44, 1, 7, 0.03, W);
-  tube(body, [[0, 1.48, 0.7, 0.31], [0, 1.85, 0.98, 0.23], [0, 2.2, 1.12, 0.165], [0, 2.44, 1.18, 0.13]], 8, W);
-  tube(body, [[0, 1.3, 0.84, 0.16], [0, 1.6, 1.08, 0.13], [0, 1.95, 1.2, 0.07]], 5, W, null, true);                                      // the ruff under his neck
+  const body = new Builder(2400), head = new Builder(900), W = () => [1, 1, 1], BONE = () => [0.84, 0.88, 0.96];
+  // White where the light finds him and the blue of his own shadow beneath: without that he is a hole cut in the picture.
+  const under = (ny) => { const k = smooth(-0.55, 0.5, ny); return [0.56 + 0.44 * k, 0.64 + 0.36 * k, 0.84 + 0.16 * k]; }, SK = (nx, ny) => under(ny);
+  const leg = (dark) => (i) => i >= 4 ? [0.16, 0.18, 0.26] : mulCol(under(0.3 - i * 0.22), dark);
+  // He faces +z in his own frame. A red deer a quarter over life size: 1.6 m at the shoulder; deep in the chest, high in
+  // the withers, tucked up behind, and standing as a beast stands, with no two feet abreast.
+  lump(body, 0, 1.43, 0.0, 0.34, 0.4, 0.88, 2, 5, 0.03, SK); lump(body, 0, 1.44, 0.5, 0.33, 0.52, 0.46, 2, 6, 0.03, SK); lump(body, 0, 1.53, -0.56, 0.35, 0.45, 0.5, 2, 7, 0.03, SK);
+  lump(body, 0, 1.8, 0.4, 0.17, 0.2, 0.36, 1, 8, 0.02, SK);                                                                             // the withers
+  tube(body, [[0, 1.5, 0.66, 0.34], [0, 1.86, 0.98, 0.24], [0, 2.2, 1.12, 0.16], [0, 2.44, 1.18, 0.125]], 9, W);
+  tube(body, [[0, 1.16, 0.8, 0.2], [0, 1.5, 1.08, 0.17], [0, 1.9, 1.22, 0.1], [0, 2.2, 1.26, 0.04]], 6, () => [0.66, 0.74, 0.92], null, true);     // the mane under his neck
   for (const sx of [-1, 1]) {
-    tube(body, [[sx * 0.17, 1.38, 0.52, 0.135], [sx * 0.17, 0.95, 0.56, 0.085], [sx * 0.17, 0.62, 0.53, 0.058], [sx * 0.17, 0.14, 0.5, 0.042], [sx * 0.17, 0.0, 0.53, 0.056], [sx * 0.17, -0.3, 0.53, 0.05]], 6, W);
-    tube(body, [[sx * 0.19, 1.42, -0.58, 0.175], [sx * 0.2, 1.0, -0.66, 0.1], [sx * 0.2, 0.68, -0.84, 0.064], [sx * 0.2, 0.16, -0.74, 0.042], [sx * 0.2, 0.0, -0.71, 0.056], [sx * 0.2, -0.3, -0.71, 0.05]], 6, W);
+    const f = sx * 0.09, h = -sx * 0.11;                                                              // the near fore foot forward, the near hind foot back
+    tube(body, [[sx * 0.18, 1.4, 0.52, 0.15], [sx * 0.18, 0.98, 0.56 + f * 0.5, 0.092], [sx * 0.175, 0.64, 0.54 + f, 0.06], [sx * 0.17, 0.16, 0.5 + f * 1.3, 0.043], [sx * 0.17, 0.02, 0.54 + f * 1.3, 0.058], [sx * 0.17, -0.3, 0.54 + f * 1.3, 0.052]], 7, leg(sx > 0 ? 1 : 0.9));
+    tube(body, [[sx * 0.2, 1.46, -0.6, 0.2], [sx * 0.21, 1.02, -0.68 + h * 0.4, 0.11], [sx * 0.21, 0.7, -0.86 + h, 0.066], [sx * 0.2, 0.17, -0.75 + h * 1.2, 0.043], [sx * 0.2, 0.02, -0.71 + h * 1.2, 0.058], [sx * 0.2, -0.3, -0.71 + h * 1.2, 0.052]], 7, leg(sx > 0 ? 1 : 0.9));
   }
-  tube(body, [[0, 1.74, -0.9, 0.06], [0, 1.62, -1.02, 0.045], [0, 1.46, -1.05, 0.02]], 4, W, null, true);
+  tube(body, [[0, 1.76, -0.94, 0.07], [0, 1.64, -1.06, 0.05], [0, 1.46, -1.09, 0.02]], 5, W, null, true);
   // the head, about the top of the neck
   tube(head, [[0, -0.05, -0.08, 0.12], [0, 0.03, 0.1, 0.13], [0, 0.0, 0.26, 0.1], [0, -0.06, 0.4, 0.07], [0, -0.1, 0.5, 0.055], [0, -0.11, 0.545, 0.028]], 7, W, null, true);
   for (const sx of [-1, 1]) {
@@ -198,15 +213,15 @@ function stag(ctx) {
     tine(main[4], [-sx * 0.35, 0.85, -0.4], 0.5, 0.025, -0.3); tine(main[4], [sx * 0.6, 0.75, 0.3], 0.46, 0.025, 0.3); tine(main[4], [sx * 0.2, 0.5, -0.8], 0.4, 0.022);
   }
   lump(head, 0, -0.105, 0.54, 0.03, 0.025, 0.02, 0, 4, 0, () => [0.05, 0.05, 0.08]);
-  const mat = makePaint({ color: '#eef2fa', brush: 0.25, brushScale: 0.9, emissive: '#3a4759', rim: { color: '#ffffff', strength: 0.9, power: 2.2 } });
+  const mat = makePaint({ color: '#eef2fa', brush: 0.25, brushScale: 0.9, emissive: '#26303f', rim: { color: '#ffffff', strength: 0.9, power: 2.2 } });
   const K = 1.5;                                                         // half again the size of a red deer: he is not one
   const grp = new THREE.Group(); grp.name = 'Eikthyrnir'; grp.position.copy(p); grp.scale.setScalar(K);
-  const dir = [here.rx * 0.8 - here.tx * 0.6, here.rz * 0.8 - here.tz * 0.6], yaw = Math.atan2(dir[0], dir[1]); grp.rotation.y = yaw;        // across the river and a little upstream: toward whoever is coming
-  const hd = new THREE.Mesh(head.build({ uv: false, bend: false }), mat); hd.position.set(0, 2.44, 1.18);
+  const dir = [here.rx * 0.42 - here.tx * 0.91, here.rz * 0.42 - here.tz * 0.91], yaw = Math.atan2(dir[0], dir[1]); grp.rotation.y = yaw;        // up the river and a little out into it: his flank to the water, his breast to whoever is coming
+  const hd = new THREE.Mesh(head.build({ uv: false, bend: false }), mat); hd.position.set(0, 2.44, 1.18); hd.scale.setScalar(1.22);
   grp.add(new THREE.Mesh(body.build({ uv: false, bend: false }), mat), hd);
   ctx.world.addMoving(grp);
   ctx.obstacles.push({ x: p.x, z: p.z, r: 1.6 });
-  ctx.lights.push({ position: V3(p.x + dir[0] * 2.6, 1.5, p.z + dir[1] * 2.6), color: new THREE.Color('#bcd4ff'), radius: 9, intensity: 0.6 });      // before him, over the water: his own whiteness given back
+  ctx.lights.push({ position: V3(p.x + here.rx * 2.4 + dir[0] * 1.2, 1.5, p.z + here.rz * 2.4 + dir[1] * 1.2), color: new THREE.Color('#bcd4ff'), radius: 9, intensity: 0.6, glint: false });      // before him, over the water: his own whiteness given back
   // what drips from his antlers: three drops at a time, each ringing the water where it lands
   const cs = Math.cos(yaw), sn = Math.sin(yaw), tips = [[-0.72, 4.5, 1.3], [0.76, 4.55, 1.2], [0.22, 3.1, 1.85]].map(([x, y, z]) => V3(p.x + (x * cs + z * sn) * K, y * K + p.y, p.z + (-x * sn + z * cs) * K));
   const drops = tips.map((t, i) => ({ t, glow: ctx.glows.add({ position: t.clone(), size: 0.07, color: new THREE.Color('#cfe4ff'), power: 0 }), ph: i * 0.37, last: 0 }));
@@ -218,7 +233,7 @@ function stag(ctx) {
     const dx = eye.x - p.x, dz = eye.z - p.z, dist = Math.hypot(dx, dz);
     let to = Math.atan2(dx, dz) - yaw; to = Math.atan2(Math.sin(to), Math.cos(to)); to = Math.max(-1.3, Math.min(1.3, to)) * smooth(70, 44, dist);
     look += (to - look) * Math.min(1, dt * 1.6); if (boat.frozen) look = to;
-    hd.rotation.y = look + 0.03 * Math.sin(time * 0.4); hd.rotation.x = -0.12 * smooth(60, 20, dist) + 0.02 * Math.sin(time * 0.9);
+    hd.rotation.y = look + 0.03 * Math.sin(time * 0.4); hd.rotation.x = 0.26 * smooth(60, 16, dist) + 0.02 * Math.sin(time * 0.9);                  // (he looks down at her: he is a long way up)
     for (const d of drops) {
       const u = (time * 0.42 + d.ph) % 1, fall = Math.min(1, u * 2.2), y = d.t.y * (1 - fall * fall);
       d.glow.position.set(d.t.x, Math.max(0.02, y), d.t.z); d.glow.power = fall < 1 ? 0.9 : 0;

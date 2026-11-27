@@ -130,7 +130,7 @@ const FRAG = /* glsl */`
   uniform vec3 uDeep, uTouch; uniform vec4 uWaterP, uRippleRect;
   uniform sampler2D tWave, tRipple;
   uniform vec3 uLanternPos, uLanternColor; uniform float uLanternRadius;
-  uniform vec4 uLights[${MAX_LIGHTS}]; uniform vec3 uLightColors[${MAX_LIGHTS}];
+  uniform vec4 uLights[${MAX_LIGHTS}]; uniform vec3 uLightColors[${MAX_LIGHTS}]; uniform vec4 uLightGlint;
   varying vec3 vWPos; varying vec3 vView; varying vec3 vEdge;                  // (how near the bank, the sheet's own rim, metres out from the waterline)
   // a flame over water: the light it lays on the surface, and its glitter on the wavelets that face the eye
   vec3 flame(vec3 P, vec3 N, vec3 V, vec3 lp, vec3 lc, float r) {
@@ -181,7 +181,7 @@ const FRAG = /* glsl */`
     }
     c += uFrontColor * (fr * uFrontP.z * 0.22 * smoothstep(0.5, 3.0, uFrontP.x));      // and a front of light lies on the water as it goes (a broad one: a shuttle's does not)
     c += flame(vWPos, N, V, uLanternPos, uLanternColor, uLanternRadius);
-    for (int i = 0; i < ${MAX_LIGHTS}; i++) c += flame(vWPos, N, V, uLights[i].xyz, uLightColors[i], uLights[i].w);
+    for (int i = 0; i < ${MAX_LIGHTS}; i++) c += flame(vWPos, N, V, uLights[i].xyz, uLightColors[i], uLights[i].w) * uLightGlint[i];
     // turned water takes the lantern's colour only where the lantern reaches it; further off it is merely less of a mirror
     float reach = 1.0 - smoothstep(uLanternRadius * 0.2, uLanternRadius * 2.0, length(uLanternPos - vWPos));
     c += uTouch * (stir * stir) * (reach * reach);

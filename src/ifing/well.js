@@ -13,7 +13,7 @@
 // keeper's lights and the same fire as the first: three seats round it, and nobody.
 import * as THREE from 'three';
 import { Builder, mulCol, mixCol } from './build.js';
-import { tube, bell, lump } from './flora.js';
+import { tube, bell, lump, sweep } from './flora.js';
 import { river, LENGTH } from './river.js';
 import { region, BARK_U, barkSheet } from './art.js';
 import { makePaint } from './paint.js';
@@ -28,18 +28,6 @@ export const TREE = { s: LENGTH + 170 }, ARCH = { s: 836 }, SKERRY = { s: 1022, 
 const LEAF_TOP = [1.0, 1.0, 0.98], LEAF = [0.8, 0.88, 0.9], LEAF_DEEP = [0.46, 0.56, 0.72];
 const PALE = [1.5, 1.5, 1.46];                                     // what the well's water has had the keeping of
 const PULSE = new THREE.Color('#c4ffe6'), EVERY = 26, SPEED = 20;   // the light that leaves the tree: its colour, how often, how fast it crosses the well
-
-/** A path of [x, y, z, r] drawn through its points as a bent bough is, `sub` steps to each span. */
-function sweep(pts, sub = 3) {
-  const out = [], n = pts.length, P = (i) => pts[Math.max(0, Math.min(n - 1, i))];
-  for (let i = 0; i < n - 1; i++) for (let k = 0; k < sub; k++) {
-    const t = k / sub, a = P(i - 1), b = P(i), c = P(i + 1), d = P(i + 2), q = [];
-    for (let j = 0; j < 4; j++) q.push(0.5 * (2 * b[j] + (c[j] - a[j]) * t + (2 * a[j] - 5 * b[j] + 4 * c[j] - d[j]) * t * t + (3 * b[j] - a[j] - 3 * c[j] + d[j]) * t * t * t));
-    out.push(q);
-  }
-  out.push(pts[n - 1].slice());
-  return out;
-}
 
 /**
  * A rune stone: a slab set on end, one face of it flat for writing on, its head rounded by weather. Its foot is at the
