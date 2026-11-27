@@ -199,8 +199,9 @@ export function pine(seed, lod) {
   // the crown: a few dark clouds of needles, flat beneath, set at different heights round the top of the mast
   const cushions = lod === 2 ? 3 : 5 + Math.floor(rnd() * 3);
   for (let k = 0; k < cushions; k++) {
-    const t = k === 0 ? 1 : 0.66 + rnd() * 0.32, p = at(t), th = ph + k * 2.4 + rnd(), reach = k === 0 ? 0 : H * (0.06 + rnd() * 0.11);
-    const cx = p[0] + Math.cos(th) * reach, cz = p[2] + Math.sin(th) * reach, cy = p[1] + (k === 0 ? 0.3 : reach * 0.3), a = H * (0.07 + rnd() * 0.06) * (lod === 2 ? 1.2 : 1);
+    const t = k === 0 ? 1 : 0.66 + rnd() * 0.32, p = at(t), th = ph + k * 2.4 + rnd(), wide = k === 0 ? 0 : H * (0.06 + rnd() * 0.11), a = H * (0.07 + rnd() * 0.06) * (lod === 2 ? 1.2 : 1);
+    const reach = lod === 2 ? Math.min(wide, a * 0.7) : wide;      // far off there are no limbs drawn to carry a cushion: it must touch the mast, or it floats
+    const cx = p[0] + Math.cos(th) * reach, cz = p[2] + Math.sin(th) * reach, cy = p[1] + (k === 0 ? 0.3 : reach * 0.3);
     if (k > 0 && lod < 2) tube(b, [[p[0], p[1] - a * 0.5, p[2], r0 * 0.24], [(p[0] + cx) / 2, cy - a * 0.5, (p[2] + cz) / 2, r0 * 0.17], [cx, cy - a * 0.05, cz, r0 * 0.08]], 3, () => mulCol(BARK_RED, 0.7));
     const hue = 0.85 + rnd() * 0.3; bell(cut, cx, cy, cz, a, a * 0.5, a * 0.5, lod === 0 ? 7 : lod === 1 ? 5 : 4, PINE_REG, (q) => mulCol(SKIRT, hue * [1.1, 1.2, 0.95, 0.8][q]), 0.5, rnd, lod === 2);
   }

@@ -60,11 +60,14 @@ async function begin() {
   if (preview) { boat.frozen = true; if (Q.has('s')) boat.place(num('s', 2), num('d', 0), num('turn', 0) * Math.PI / 180); boat.view.yaw = num('yaw', 0) * Math.PI / 180; boat.view.pitch = num('pitch', 0) * Math.PI / 180; }
   if (Q.has('noboat')) { boat.group.visible = false; for (const o of boat.oars) o.mesh.visible = false; boat.glow.on = 0; }
   let time = num('t', 0);
+  // ?day: the river in flat daylight, for finding what is wrong with it (the game itself never asks for this)
+  const DAY = Q.has('day') && { shade: '#56606c', half: '#959da4', lit: '#ecebe2', skyLight: '#7f90a2', groundLight: '#4e524a', zenith: '#587eb0', mid: '#86a7c8', horizon: '#b9c9d2', fog: '#a9b9c5', mist: '#c0ccd2', deep: '#1c3040' };
   const eyeY = num('eye', EYE), eyeW = new THREE.Vector3(), camAt = Q.has('cam') ? Q.get('cam').split(',').map(Number) : null;      // ?cam=x,y,z: look at her from outside
 
   engine.start((dt) => {
     time += dt; shared.uTime.value = time;
     lookAt(boat.s, look);
+    if (DAY) { for (const k in DAY) look[k].set(DAY[k]); look.fogDensity *= 0.25; look.mistAmount *= 0.3; look.gain = 1; look.exposure = 1; }
     boat.update(dt, time, look);
     if (!engine.presenting && eyeY !== EYE) camera.position.y = eyeY;
     if (!engine.presenting && camAt) camera.position.fromArray(camAt);

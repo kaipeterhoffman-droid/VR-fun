@@ -114,8 +114,8 @@ export class Ripples {
 
 // ------------------------------------------------------------------------------------------------ the glass
 const VERT = /* glsl */`
-  attribute vec2 aEdge;
-  varying vec3 vWPos; varying vec3 vView; varying vec2 vEdge;
+  attribute vec3 aEdge;
+  varying vec3 vWPos; varying vec3 vView; varying vec3 vEdge;
   void main() {
     vec4 wp = modelMatrix * vec4(position, 1.0);
     vWPos = wp.xyz; vEdge = aEdge;
@@ -130,7 +130,7 @@ const FRAG = /* glsl */`
   uniform sampler2D tWave, tRipple;
   uniform vec3 uLanternPos, uLanternColor; uniform float uLanternRadius;
   uniform vec4 uLights[${MAX_LIGHTS}]; uniform vec3 uLightColors[${MAX_LIGHTS}];
-  varying vec3 vWPos; varying vec3 vView; varying vec2 vEdge;
+  varying vec3 vWPos; varying vec3 vView; varying vec3 vEdge;                  // (how near the bank, the sheet's own rim, metres out from the waterline)
   // a flame over water: the light it lays on the surface, and its glitter on the wavelets that face the eye
   vec3 flame(vec3 P, vec3 N, vec3 V, vec3 lp, vec3 lc, float r) {
     vec3 d = lp - P; float dist = length(d); vec3 L = d / max(dist, 1e-3);
@@ -159,6 +159,8 @@ const FRAG = /* glsl */`
     sky += uMoonColor * smoothstep(1.0 - mr * mr * 1.6, 1.0 - mr * mr * 0.3, mh) * 1.4;      // the moon's road
     float shore = vEdge.x * vEdge.x;
     vec3 body = uDeep * (1.0 + 1.6 * shore) + uFogColor * 0.05 * shore;
+    float shoal = 1.0 - smoothstep(0.0, 1.7, vEdge.z);
+    body += (uDeep * 1.5 + uFogColor * 0.11) * shoal * shoal;                // the last of the water is thin, and the bed shows through it
     vec3 c = body * (1.0 - F) + sky * (F * broken);
     // and the pillar of it: a column of broken light from under the moon to the bow, each piece of it lying across
     // the way one looks (it is what Munch painted every summer of his life). The pieces are laid out by bearing and
@@ -177,9 +179,13 @@ const FRAG = /* glsl */`
     // turned water takes the lantern's colour only where the lantern reaches it; further off it is merely less of a mirror
     float reach = 1.0 - smoothstep(uLanternRadius * 0.2, uLanternRadius * 2.0, length(uLanternPos - vWPos));
     c += uTouch * (stir * stir) * (reach * reach);
+    // where the water meets the land: a thread of light that comes and goes with the wavelets, and is never a ruled line
+    float lapN = texture2D(tWave, p * 0.83 + vec2(0.021, -0.016) * uTime).g - 0.5;
+    float lap = (1.0 - smoothstep(0.0, 0.16, abs(vEdge.z - 0.03 - lapN * 0.3 - 0.05 * sin(uTime * 0.8 + p.x * 0.61 + p.y * 0.83)))) * near;
+    c += (sky * 0.55 + uFogColor * 0.3 + uTouch * (reach * reach * reach * reach) * 0.3) * lap * 0.55;
     float fog = fogAmount(0.0, dist, 1.0);
     c = mix(c, fogTint(-V, 0.0), fog);
-    float keep = F * m * (1.0 - fog);
+    float keep = F * m * (1.0 - fog) * (1.0 - lap * 0.6);
     c *= vEdge.y; keep = mix(1.0, keep, vEdge.y) * (1.0 - uVeil);            // at its far rim the sheet thins away into the dome's own mirror
     gl_FragColor = develop(c, keep);
   }
@@ -219,7 +225,7 @@ export class Water {
         river.point(s, c * hw, pt);
         pos.push(pt[0], 0, pt[1]);
         const wide = Math.abs(c) > 0.99 ? 1 - Math.min(1, Math.max(0, (hw - 40) / 30)) : 1;   // out on the open water the sheet's side rims fade too
-        edge.push(Math.max(0, (Math.abs(c) - 0.45) / 0.55), rim * wide);
+        edge.push(Math.max(0, (Math.abs(c) - 0.45) / 0.55), rim * wide, hw - 2.2 - Math.abs(c) * hw);
       }
       if (r > 0) for (let c = 0; c < cols.length - 1; c++) {
         const a = (r - 1) * cols.length + c, b = a + 1, d = r * cols.length + c, e = d + 1;
@@ -227,7 +233,7 @@ export class Water {
       }
     });
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('aEdge', new THREE.Float32BufferAttribute(edge, 2));
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('aEdge', new THREE.Float32BufferAttribute(edge, 3));
     g.setIndex(idx);
     return g;
   }

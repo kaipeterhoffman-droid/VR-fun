@@ -106,7 +106,7 @@ const bankL = BANK.map(([s, l]) => [s, l]), bankR = BANK.map(([s, , r]) => [s, r
  * Height of the land `out` metres outside the channel's edge on one side (-1 left, +1 right) at s.
  * Zero at the waterline, a lip of mud and roots, the bank, then the forest floor rolling away behind it.
  */
-export function landHeight(s, side, out) {
+export function landShape(s, side, out) {
   if (out <= 0) return 0;
   const bank = track(side < 0 ? bankL : bankR, s);
   const u = s * 0.11 + side * 31.7, v = out * 0.16 + side * 5.3;
@@ -115,6 +115,30 @@ export function landHeight(s, side, out) {
   const hummocks = (fbm2(u, v, 3) - 0.5) * 0.9 * smooth(0.6, 3.5, out);
   const roll = (fbm2(s * 0.021 + side * 3.3, out * 0.03 + 7.7, 3) - 0.35) * 5.5 * smooth(6, 34, out);
   return Math.max(0.02, lip + rise + hummocks + roll);
+}
+
+// The ground that is drawn is a net thrown over that shape (land.js): rows every BANK_ROW metres along the river, and a
+// knot at each of BANK_OUT metres back from the water. Whatever stands on the land must stand on the net and not on the
+// shape, or it floats where the net cuts a corner: so this is the height everything else asks for.
+export const BANK_OUT = [0, 0.35, 0.8, 1.5, 2.6, 4.2, 6.5, 9.5, 13.5, 19, 26, 35, 46, 62];
+export const BANK_ROW = 2;
+const knots = new Map();
+function knot(r, c, side) {
+  const key = ((r + 4096) * 16 + c) * 2 + (side > 0 ? 1 : 0);
+  let h = knots.get(key);
+  if (h === undefined) { h = c === 0 ? -0.05 : landShape(r * BANK_ROW, side, BANK_OUT[c]); knots.set(key, h); }
+  return h;
+}
+/** Height of the drawn ground `out` metres outside the channel's edge on one side (-1 left, +1 right) at s. */
+export function landHeight(s, side, out) {
+  if (out <= 0) return 0;
+  const O = BANK_OUT;
+  if (out >= O[O.length - 1]) return landShape(s, side, out);
+  let c = 0; while (out >= O[c + 1]) c++;
+  const r = Math.floor(s / BANK_ROW), fs = s / BANK_ROW - r, fo = (out - O[c]) / (O[c + 1] - O[c]);
+  const h00 = knot(r, c, side), h10 = knot(r + 1, c, side), h01 = knot(r, c + 1, side), h11 = knot(r + 1, c + 1, side);
+  // each mesh of the net is two triangles, split from its near upstream corner to its far downstream one
+  return fs >= fo ? h00 + (h10 - h00) * fs + (h11 - h10) * fo : h00 + (h01 - h00) * fo + (h11 - h01) * fs;
 }
 
 /** How wooded a place is, 0..1, by reach: thick in the Ironwood, open round the mere, nothing on the well. */
